@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../core/l10n/generated/app_localizations.dart';
-import 'bloc/counter_cubit.dart';
+import '../../../core/l10n/generated/app_localizations.dart';
+import '../bloc/counter_cubit.dart';
 
 /// The counter screen.
 ///

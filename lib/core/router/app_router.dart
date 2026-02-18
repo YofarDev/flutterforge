@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/counter/counter_screen.dart';
-import '../../features/home/home_page.dart';
+import '../../features/counter/screens/counter_screen.dart';
+import '../../features/home/screens/home_screen.dart';
 
 /// The application router configuration.
 ///
@@ -93,7 +93,7 @@ class AppRouter {
         path: _homePath,
         name: 'Home',
         builder: (BuildContext context, GoRouterState state) {
-          return const HomePage();
+          return const HomeScreen();
         },
       ),
 

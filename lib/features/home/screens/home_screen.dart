@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../core/l10n/generated/app_localizations.dart';
-import 'bloc/home_cubit.dart';
+import '../../../core/l10n/generated/app_localizations.dart';
+import '../bloc/home_cubit.dart';
 
 /// The home screen of the application.
 ///
 /// This screen serves as the main entry point and can be customized
 /// to display whatever content is appropriate for your app.
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {

@@ -3,22 +3,22 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_flutter_app/core/l10n/generated/app_localizations.dart';
 import 'package:my_flutter_app/features/home/bloc/home_cubit.dart';
-import 'package:my_flutter_app/features/home/home_page.dart';
+import 'package:my_flutter_app/features/home/screens/home_screen.dart';
 
-/// Widget tests for the HomePage and HomeView.
+/// Widget tests for the HomeScreen and HomeView.
 ///
 /// These tests verify that:
 /// - UI elements are rendered correctly
 /// - Loading state is shown during initialization
 /// - Welcome message is displayed after loading
 void main() {
-  group('HomePage', () {
+  group('HomeScreen', () {
     testWidgets('renders HomeView', (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: const HomePage(),
+          home: const HomeScreen(),
         ),
       );
       await tester.pumpAndSettle(const Duration(milliseconds: 600));
@@ -31,7 +31,7 @@ void main() {
         MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: const HomePage(),
+          home: const HomeScreen(),
         ),
       );
       await tester.pumpAndSettle(const Duration(milliseconds: 600));

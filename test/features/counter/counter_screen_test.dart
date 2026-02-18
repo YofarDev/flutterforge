@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:my_flutter_app/core/l10n/generated/app_localizations.dart';
 import 'package:my_flutter_app/features/counter/bloc/counter_cubit.dart';
-import 'package:my_flutter_app/features/counter/counter_screen.dart';
+import 'package:my_flutter_app/features/counter/screens/counter_screen.dart';
 
 /// Widget tests for the CounterScreen and CounterView.
 ///

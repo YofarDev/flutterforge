@@ -63,6 +63,15 @@ find test -name "*.dart" -type f -exec sed -i.bak "s/package:my_flutter_app/pack
 find test -name "*.bak" -type f -delete
 echo "   ✓ Import paths updated"
 
+# 5. Copy .claude folder (contains skills and configuration)
+echo "🤖 Copying '.claude' folder..."
+if [ -d "$SCRIPT_DIR/.claude" ]; then
+    cp -r "$SCRIPT_DIR/.claude" .
+    echo "   ✓ .claude folder copied"
+else
+    echo "⚠️  Warning: .claude folder not found in template. Skipping."
+fi
+
 # 6. Copy analysis_options.yaml
 echo "⚙️  Copying 'analysis_options.yaml'..."
 cp "$SCRIPT_DIR/analysis_options.yaml" .
