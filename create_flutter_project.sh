@@ -58,7 +58,7 @@ cp -r "$SCRIPT_DIR/test" .
 # 4. Update import paths in test files
 echo "🔧 Updating import paths in test files..."
 # Replace the placeholder package name with the actual project name
-find test -name "*.dart" -type f -exec sed -i.bak "s/package:my_flutter_app/package:$ORG.$PROJECT_NAME/g" {} \;
+find test -name "*.dart" -type f -exec sed -i.bak "s/package:my_flutter_app/package:$PROJECT_NAME/g" {} \;
 # Remove backup files
 find test -name "*.bak" -type f -delete
 echo "   ✓ Import paths updated"
