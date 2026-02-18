@@ -198,7 +198,13 @@ echo "🌐 Generating localization files..."
 flutter gen-l10n
 echo "   ✓ Localization files generated"
 
-# 16. Copy README.md
+# 16. Run build_runner (for freezed code generation)
+echo "🔧 Running build_runner for code generation..."
+echo "   (This may take a minute...)"
+dart run build_runner build --delete-conflicting-outputs
+echo "   ✓ Code generation complete"
+
+# 17. Copy README.md
 echo "📄 Copying README.md..."
 if [ -f "$SCRIPT_DIR/README.md" ]; then
     cp "$SCRIPT_DIR/README.md" .
@@ -208,3 +214,7 @@ else
 fi
 
 echo "✅ Project setup complete!"
+
+# 18. Open in VS Code
+echo "📝 Opening project in VS Code..."
+code .

@@ -1,12 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Application theme configuration.
-///
-/// This class provides theme definitions for the app.
-/// Customize colors, typography, and other theme properties here.
-///
-/// The app uses Material 3 design.
-/// Learn more: https://m3.material.io/
+/// App theme configuration (Material 3).
+/// Customize seedColor and other properties here.
 class AppTheme {
   AppTheme._();
 

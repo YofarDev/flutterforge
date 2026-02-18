@@ -1,24 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/generated/app_localizations.dart';
 import '../bloc/counter_cubit.dart';
 
-/// The counter screen.
-///
-/// DEMO FEATURE: This is a demonstration feature that can be deleted.
-/// It shows how to create a feature screen with BLoC/Cubit integration.
-///
-/// This screen demonstrates:
-/// - Setting up a BlocProvider
-/// - Using BlocBuilder to react to state changes
-/// - Implementing user interactions that call cubit methods
-/// - Building a proper UI with Material Design
-///
-/// To remove this feature:
-/// 1. Delete the `/lib/features/counter` directory
-/// 2. Remove the counter route from `lib/core/router/app_router.dart`
-/// 3. Remove any navigation references to the counter screen
+/// DEMO FEATURE - Delete counter folder when building your app.
+/// Demonstrates: BlocProvider, BlocBuilder, BlocListener pattern.
 class CounterScreen extends StatelessWidget {
   const CounterScreen({super.key});
 
@@ -31,10 +19,7 @@ class CounterScreen extends StatelessWidget {
   }
 }
 
-/// The actual view/widget for the counter screen.
-///
-/// Separating the view from the page allows for better testing
-/// and reusability.
+/// Counter view - separated from page for testing.
 class CounterView extends StatelessWidget {
   const CounterView({super.key});
 
@@ -43,7 +28,14 @@ class CounterView extends StatelessWidget {
     final AppLocalizations l10n = AppLocalizations.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: Text(l10n.counterTitle)),
+      appBar: AppBar(
+        title: Text(l10n.counterTitle),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(), // Now pop() will work with push()
+          tooltip: 'Back to Home',
+        ),
+      ),
       body: SafeArea(
         child: Center(
           child: Column(
@@ -100,4 +92,17 @@ class CounterView extends StatelessWidget {
       ),
     );
   }
+
+  // BlocListener example for side effects (navigation, dialogs, snackbars).
+  // IMPORTANT: Never do these in build() or BlocBuilder!
+  //
+  // Wrap with BlocListener:
+  // BlocListener<CounterCubit, CounterState>(
+  //   listener: (context, state) {
+  //     if (state.count % 10 == 0) {
+  //       ScaffoldMessenger.showSnackBar(...);
+  //     }
+  //   },
+  //   child: YourWidget(),
+  // )
 }

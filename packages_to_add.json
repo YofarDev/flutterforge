@@ -5,12 +5,16 @@
         "equatable",
         "nested",
         "go_router",
-        "freezed"
+        "freezed_annotation",
+        "get_it"
     ],
     "dev_dependencies":
     [
         "flutter_lints",
         "bloc_test",
-        "mocktail"
+        "mocktail",
+        "build_runner",
+        "freezed",
+        "json_serializable"
     ]
 }

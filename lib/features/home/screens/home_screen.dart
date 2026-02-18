@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/generated/app_localizations.dart';
 import '../bloc/home_cubit.dart';
@@ -53,6 +54,20 @@ class HomeView extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   const Text('Home Screen'),
+                  const SizedBox(height: 32),
+                  // Demo navigation button
+                  FilledButton.icon(
+                    onPressed: () => context.push('/counter'), // Use push() for proper navigation stack
+                    icon: const Icon(Icons.arrow_forward),
+                    label: const Text('Try the Counter Demo'),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'A demo feature showing BLoC state management',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                 ],
               ),
             ),

@@ -1,20 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'core/l10n/generated/app_localizations.dart';
 
+import 'core/di/service_locator.dart';
+import 'core/l10n/generated/app_localizations.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
-import 'core/utils/logger.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Log app startup
-  AppLogger.info('Application starting...');
-
+  await setupServiceLocator(); // Initialize DI before runApp
   runApp(const MyApp());
 }
-
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -24,34 +20,18 @@ class MyApp extends StatelessWidget {
     return MaterialApp.router(
       title: 'Yofardev Flutter App',
       debugShowCheckedModeBanner: false,
-
-      // Theme configuration
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark, // Default to dark theme
-
-      // Router configuration
+      themeMode: ThemeMode.dark,
       routerConfig: AppRouter.router,
-
-      // Localization configuration
       localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
-        AppLocalizations.delegate, // Generated localization delegate
-        GlobalMaterialLocalizations.delegate, // Material localization
-        GlobalWidgetsLocalizations.delegate, // Widgets localization
-        GlobalCupertinoLocalizations.delegate, // Cupertino localization
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
       ],
-
-      // Supported locales
-      // Add new locales here when adding new translations
-      supportedLocales: const <Locale>[
-        Locale('en'), // English
-        Locale('fr'), // French
-      ],
-
-      // Fallback locale if a specific locale is not found
-      // This ensures the app always has a valid locale
+      supportedLocales: const <Locale>[Locale('en'), Locale('fr')],
       locale: const Locale('en'),
     );
   }
 }
-

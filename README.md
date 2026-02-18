@@ -1,432 +1,236 @@
 # Flutter Project Template
 
-A well-structured Flutter project template following best practices for feature-based architecture, state management, localization, and more.
+A professional Flutter project template with feature-based architecture, state management (BLoC/Cubit), dependency injection, and localization.
 
-## Table of Contents
+## 🚀 Quick Start: Building Your App
 
-- [Project Structure](#project-structure)
-- [Architecture](#architecture)
-- [Getting Started](#getting-started)
-- [Features](#features)
-- [Localization (L10n)](#localization-l10n)
-- [Routing](#routing)
-- [State Management](#state-management)
-- [Logger](#logger)
-- [Theming](#theming)
+### ✅ Keep These (Core Infrastructure)
+
+| File/Folder | Purpose |
+|-------------|---------|
+| `lib/core/di/` | Dependency injection |
+| `lib/core/utils/` | Utilities (logger, etc.) |
+| `lib/core/theme/` | App theming |
+| `lib/core/router/` | Routing configuration |
+| `lib/core/l10n/` | Localization files |
+| `lib/main.dart` | App entry point |
+| `lib/features/home/` | Home screen |
+
+### 🗑️ Remove These (Example Code)
+
+| File/Folder | Action |
+|-------------|--------|
+| `lib/features/counter/` | Delete entire folder |
+| `lib/core/services/example_service.dart` | Delete file |
+
+**After removing examples:** Clean app with home screen and core infrastructure.
+
+---
 
 ## Project Structure
 
 ```
 lib/
-├── core/                          # Core application functionality
-│   ├── l10n/                      # Localization files
-│   │   ├── app_localizations_en.arb
-│   │   ├── app_localizations_fr.arb
-│   │   └── README.md
-│   ├── router/                    # App routing configuration
-│   │   └── app_router.dart
-│   ├── theme/                     # App theming
-│   │   └── app_theme.dart
-│   └── utils/                     # Utility functions
-│       └── logger.dart
-├── features/                      # Feature modules
-│   ├── home/                      # Home feature
-│   │   ├── bloc/
-│   │   │   ├── home_cubit.dart
-│   │   │   └── home_state.dart
-│   │   └── home_page.dart
-│   └── counter/                   # Counter demo feature (can be deleted)
-│       ├── bloc/
-│       │   ├── counter_cubit.dart
-│       │   └── counter_state.dart
-│       └── counter_screen.dart
-└── main.dart                      # App entry point
+├── core/                      # ✅ Core functionality
+│   ├── di/                    # ✅ Dependency injection
+│   ├── l10n/                  # ✅ Localization
+│   ├── router/                # ✅ App routing
+│   ├── services/              # ⚠️ Your services (example: delete)
+│   ├── theme/                 # ✅ Theming
+│   └── utils/                 # ✅ Utilities
+├── features/                  # ✅ Feature modules
+│   ├── home/                  # ✅ Keep
+│   └── counter/               # 🗑️ Demo - delete
+└── main.dart
 ```
 
-## Architecture
+Each feature contains: `bloc/` (state), `models/` (data), `screens/` (UI), `widgets/` (reusable).
 
-This template uses a **feature-based architecture** where each feature is self-contained with its own BLoC/Cubit, state, and UI. This approach:
-
-- Keeps related code together
-- Makes features easy to add or remove
-- Improves code organization and maintainability
-- Facilitates team collaboration
-
-Each feature typically contains:
-
-- **bloc/** - State management (Cubit/Bloc)
-  - `feature_cubit.dart` - Business logic
-  - `feature_state.dart` - State data
-- **models/** - Data models (if needed)
-- **screens/** - Screen widgets
-- **widgets/** - Reusable feature widgets (if needed)
+---
 
 ## Getting Started
 
-### Prerequisites
-
-- Flutter SDK (3.19.0 or higher recommended)
-- Dart SDK
-
-### Installation
-
-1. Clone or copy this template
-2. Install dependencies:
-
 ```bash
-flutter pub get
+flutter pub get           # Install dependencies
+flutter gen-l10n          # Generate localization
+flutter run               # Run app
 ```
 
-3. Generate localization files:
+---
 
-```bash
-flutter gen-l10n
-```
+## Architecture
 
-4. Run the app:
+**Feature-based**: Each feature is self-contained with BLoC/Cubit, state, and UI. Keeps code organized and easy to maintain.
 
-```bash
-flutter run
-```
-
-## Features
-
-### Home Feature
-
-The main entry point of the application. Extend this feature to build your app's main interface.
-
-### Counter Feature (Demo)
-
-A demonstration feature showing how to implement state management with BLoC/Cubit.
-
-**To remove this demo feature:**
-
-1. Delete the `/lib/features/counter` directory:
-
-```bash
-rm -rf lib/features/counter
-```
-
-2. Remove the counter route from `/lib/core/router/app_router.dart`:
-
-```dart
-// Delete this GoRoute block
-GoRoute(
-  path: '/counter',
-  name: 'Counter',
-  builder: (BuildContext context, GoRouterState state) {
-    return const CounterScreen();
-  },
-),
-```
-
-3. Remove the import statement:
-
-```dart
-// Remove this line
-import '../../features/counter/counter_screen.dart';
-```
+---
 
 ## Adding New Features
 
-Follow these steps to add a new feature:
+See `/lib/features/counter/` for a complete working example.
 
-### 1. Create the Feature Directory
+**Quick steps:**
+1. Create feature directory: `lib/features/my_feature/bloc/`
+2. Create state + cubit files
+3. Create screen widget
+4. Add route in `app_router.dart`
+5. Add translations (optional)
 
-```bash
-mkdir -p lib/features/my_feature/bloc
-```
+---
 
-### 2. Create the State File
+## Dependency Injection
 
-**File:** `lib/features/my_feature/bloc/my_feature_state.dart`
-
-```dart
-part of 'my_feature_cubit.dart';
-
-class MyFeatureState extends Equatable {
-  final String data;
-
-  const MyFeatureState({this.data = ''});
-
-  MyFeatureState copyWith({String? data}) {
-    return MyFeatureState(data: data ?? this.data);
-  }
-
-  @override
-  List<Object> get props => <Object>[data];
-}
-```
-
-### 3. Create the Cubit File
-
-**File:** `lib/features/my_feature/bloc/my_feature_cubit.dart`
+Uses [get_it](https://pub.dev/packages/get_it). Configure in `lib/core/di/service_locator.dart`.
 
 ```dart
-import 'package:equatable/equatable.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+// Register service
+getIt.registerLazySingleton<MyService>(() => MyService());
 
-part 'my_feature_state.dart';
-
-class MyFeatureCubit extends Cubit<MyFeatureState> {
-  MyFeatureCubit() : super(const MyFeatureState());
-
-  // Add your methods here
-  void fetchData() {
-    // Your logic here
-  }
-}
+// Use anywhere
+final service = getIt<MyService>();
 ```
 
-### 4. Create the Screen
+| Type | Use Case |
+|------|----------|
+| `registerLazySingleton` | Services (created on first use) |
+| `registerFactory` | BLoCs/Cubits (new instance each time) |
+| `registerSingleton` | Single instance objects |
 
-**File:** `lib/features/my_feature/my_feature_screen.dart`
+---
+
+## State Management (BLoC/Cubit)
+
+Uses [flutter_bloc](https://pub.dev/packages/flutter_bloc).
 
 ```dart
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
+// Access cubit
+context.read<MyCubit>().doSomething();
 
-import 'bloc/my_feature_cubit.dart';
-
-class MyFeatureScreen extends StatelessWidget {
-  const MyFeatureScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return BlocProvider<MyFeatureCubit>(
-      create: (BuildContext context) => MyFeatureCubit(),
-      child: const MyFeatureView(),
-    );
-  }
-}
-
-class MyFeatureView extends StatelessWidget {
-  const MyFeatureView({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Feature'),
-      ),
-      body: BlocBuilder<MyFeatureCubit, MyFeatureState>(
-        builder: (context, state) {
-          return Center(child: Text(state.data));
-        },
-      ),
-    );
-  }
-}
-```
-
-### 5. Add the Route
-
-Update `/lib/core/router/app_router.dart`:
-
-1. Add the import:
-
-```dart
-import '../../features/my_feature/my_feature_screen.dart';
-```
-
-2. Add the route:
-
-```dart
-GoRoute(
-  path: '/my-feature',
-  name: 'MyFeature',
-  builder: (BuildContext context, GoRouterState state) {
-    return const MyFeatureScreen();
-  },
-),
-```
-
-### 6. Add Translations (Optional)
-
-Update the `.arb` files in `/lib/core/l10n/`:
-
-**app_localizations_en.arb:**
-
-```json
-{
-  "myFeature": {
-    "title": "My Feature",
-    "description": "Feature description"
-  }
-}
-```
-
-**app_localizations_fr.arb:**
-
-```json
-{
-  "myFeature": {
-    "title": "Ma Fonctionnalité",
-    "description": "Description de la fonctionnalité"
-  }
-}
-```
-
-Then regenerate:
-
-```bash
-flutter gen-l10n
-```
-
-## Localization (L10n)
-
-The app supports multiple languages out of the box. Currently configured:
-
-- English (en)
-- French (fr)
-
-### Configuration
-
-Localization is configured via `l10n.yaml` in the project root, which specifies:
-
-- ARB file location (`lib/core/l10n/`)
-- Template file (`app_localizations_en.arb`)
-- Output location for generated code
-
-### Important Notes
-
-**The `AppLocalizations` class is automatically generated.** Do not manually edit `app_localizations.dart` - it will be regenerated when you run:
-
-```bash
-flutter gen-l10n
-```
-
-Or automatically when you build/run the app (if `generate: true` is set in pubspec.yaml).
-
-### Adding New Translations
-
-1. Edit the `.arb` files in `/lib/core/l10n/`
-2. Run `flutter gen-l10n` to generate the localization code
-3. Use translations in your code:
-
-```dart
-import 'core/l10n/generated/app_localizations.dart';
-
-final l10n = AppLocalizations.of(context);
-Text(l10n.homeTitle)
-```
-
-For more details, see [/lib/core/l10n/README.md](lib/core/l10n/README.md).
-
-## Routing
-
-The app uses [go_router](https://pub.dev/packages/go_router) for navigation.
-
-### Navigating to a Route
-
-```dart
-// Navigate and replace
-context.go('/counter');
-
-// Navigate and add to stack
-context.push('/counter');
-
-// Navigate with parameters
-context.go('/user/123');
-
-// Navigate with query parameters
-context.go('/search?q=flutter');
-```
-
-For route configuration, see [/lib/core/router/app_router.dart](lib/core/router/app_router.dart).
-
-## State Management
-
-The app uses [flutter_bloc](https://pub.dev/packages/flutter_bloc) for state management.
-
-### Using a Cubit
-
-```dart
-// Access the cubit
-context.read<MyFeatureCubit>().someMethod();
-
-// Watch state changes
-BlocBuilder<MyFeatureCubit, MyFeatureState>(
-  builder: (context, state) {
-    return Text(state.data);
-  },
+// Watch state
+BlocBuilder<MyCubit, MyState>(
+  builder: (context, state) => Text(state.data),
 )
 ```
 
-## Logger
+### Side Effects (BlocListener)
 
-A simple logger utility is provided at [/lib/core/utils/logger.dart](lib/core/utils/logger.dart).
-
-### Usage
+**IMPORTANT**: Use `BlocListener` for navigation, dialogs, snackbars - never in `build()` or `BlocBuilder`.
 
 ```dart
-import 'core/utils/logger.dart';
+BlocListener<MyCubit, MyState>(
+  listener: (context, state) {
+    if (state.showError) {
+      ScaffoldMessenger.showSnackBar(...);
+    }
+  },
+  child: YourWidget(),
+)
+```
 
-void main() {
-  AppLogger.debug('Debug message');
-  AppLogger.info('Info message');
-  AppLogger.warning('Warning message');
-  AppLogger.error('Error message');
+See example in `lib/features/counter/screens/counter_screen.dart`.
+
+---
+
+## Routing
+
+Uses [go_router](https://pub.dev/packages/go_router).
+
+```dart
+context.go('/route');        // Navigate and replace
+context.push('/route');      // Add to stack
+```
+
+Configure routes in `lib/core/router/app_router.dart`.
+
+---
+
+## Localization (L10n)
+
+English + French included. Add more in `lib/core/l10n/`.
+
+```bash
+flutter gen-l10n    # Generate after editing .arb files
+```
+
+```dart
+final l10n = AppLocalizations.of(context);
+Text(l10n.myKey)
+```
+
+See [lib/core/l10n/README.md](lib/core/l10n/README.md).
+
+---
+
+## Models & Freezed
+
+Uses [freezed](https://pub.dev/packages/freezed) for immutable models.
+
+```dart
+@freezed
+class User with _$User {
+  const factory User({
+    required String id,
+    required String name,
+  }) = _User;
+
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
 }
 ```
 
-The logger includes timestamps and log levels for better debugging.
+Generate code:
+```bash
+dart run build_runner build --delete-conflicting-outputs
+```
+
+See example in `lib/features/counter/models/counter_settings.dart`.
+
+---
 
 ## Theming
 
-The app uses Material 3 design with light and dark themes. Customize theming in [/lib/core/theme/app_theme.dart](lib/core/theme/app_theme.dart).
-
-### Using Theme Colors
+Material 3 with light/dark themes. Edit in `lib/core/theme/app_theme.dart`.
 
 ```dart
-// Primary color
 Theme.of(context).colorScheme.primary
-
-// Background color
-Theme.of(context).colorScheme.surface
-
-// Text styles
 Theme.of(context).textTheme.headlineMedium
 ```
 
-## Packages Used
+---
 
-- **flutter_bloc** - State management
-- **go_router** - Routing and navigation
-- **equatable** - Value equality
-- **freezed** - Immutable data classes
-- **flutter_localizations** - Localization support
-- **intl** - Internationalization
+## Packages
 
-## Best Practices
+| Package | Purpose |
+|---------|---------|
+| flutter_bloc | State management |
+| go_router | Navigation |
+| get_it | Dependency injection |
+| freezed | Immutable models |
+| equatable | Value equality |
 
-1. **Keep features independent** - Each feature should be self-contained
-2. **Use const constructors** - Improve performance
-3. **Add comments** - Document complex logic
-4. **Follow Dart style guidelines** - Use `dart analyze` to check
-5. **Write tests** - Add unit and widget tests
-6. **Keep files small** - Split large files into smaller, focused ones
-7. **Use type annotations** - Always specify types for public APIs
+---
 
 ## Development Commands
 
 ```bash
-# Analyze code
-flutter analyze
-
-# Run tests
-flutter test
-
-# Format code
-dart format .
-
-# Generate code (freezed, l10n, etc.)
-flutter pub run build_runner build
-
-# Clean build
-flutter clean
+flutter analyze                    # Analyze code
+flutter test                       # Run tests
+dart format .                      # Format code
+dart run build_runner build        # Generate code (freezed)
+flutter gen-l10n                   # Generate localization
+flutter clean                      # Clean build
 ```
+
+---
+
+## Best Practices
+
+1. Keep features independent and self-contained
+2. Use `const` constructors for performance
+3. Use `BlocListener` for side effects, `BlocBuilder` for UI
+4. Add type annotations for public APIs
+5. Keep files small and focused
+
+---
 
 ## License
 
-This template is open source and available under the MIT License.
+MIT License.

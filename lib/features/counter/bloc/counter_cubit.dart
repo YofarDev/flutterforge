@@ -1,31 +1,43 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/utils/logger.dart';
+
 part 'counter_state.dart';
 
-/// The cubit for the Counter feature.
-///
-/// DEMO FEATURE: This is a demonstration feature that can be deleted.
-/// It shows how to create a cubit with state management.
-///
-/// This cubit manages a simple counter with increment, decrement, and
-/// reset functionality. Use this as a reference when creating your own
-/// features.
+/// DEMO FEATURE - Delete counter folder when building your app.
+/// Demonstrates basic cubit with state management.
 class CounterCubit extends Cubit<CounterState> {
-  CounterCubit() : super(const CounterState());
+  CounterCubit() : super(const CounterState()) {
+    AppLogger.debug('CounterCubit initialized', tag: 'CounterCubit');
+  }
 
   /// Increments the count by 1.
   void increment() {
-    emit(state.copyWith(count: state.count + 1));
+    final int newCount = state.count + 1;
+    AppLogger.debug('Incrementing count to $newCount', tag: 'CounterCubit');
+    emit(state.copyWith(count: newCount));
   }
 
   /// Decrements the count by 1.
   void decrement() {
-    emit(state.copyWith(count: state.count - 1));
+    final int newCount = state.count - 1;
+    AppLogger.debug('Decrementing count to $newCount', tag: 'CounterCubit');
+    emit(state.copyWith(count: newCount));
   }
 
   /// Resets the count to 0.
   void reset() {
+    AppLogger.info('Resetting counter', tag: 'CounterCubit');
     emit(const CounterState());
+  }
+
+  @override
+  void onChange(Change<CounterState> change) {
+    super.onChange(change);
+    AppLogger.debug(
+      'State changed: ${change.currentState.count} → ${change.nextState.count}',
+      tag: 'CounterCubit',
+    );
   }
 }

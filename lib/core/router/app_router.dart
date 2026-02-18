@@ -4,77 +4,10 @@ import 'package:go_router/go_router.dart';
 import '../../features/counter/screens/counter_screen.dart';
 import '../../features/home/screens/home_screen.dart';
 
-/// The application router configuration.
+/// Application router configuration using go_router.
 ///
-/// This file sets up the routing using go_router.
-/// All routes should be defined here for centralized navigation management.
-///
-/// ## Adding a New Route
-///
-/// 1. Import your screen at the top of this file:
-/// ```dart
-/// import '../../features/my_feature/my_screen.dart';
-/// ```
-///
-/// 2. Add a route constant (optional but recommended):
-/// ```dart
-/// const String _myRoute = '/my-route';
-/// ```
-///
-/// 3. Add the route to the [GoRouter] routes list:
-/// ```dart
-/// GoRoute(
-///   path: _myRoute,
-///   name: 'MyRoute',
-///   builder: (BuildContext context, GoRouterState state) {
-///     return const MyScreen();
-///   },
-/// ),
-/// ```
-///
-/// 4. Use the route in your app:
-/// ```dart
-/// // Navigate to the route
-/// context.go(_myRoute);
-///
-/// // Or use push to add to the navigation stack
-/// context.push(_myRoute);
-/// ```
-///
-/// ## Removing a Route
-///
-/// 1. Remove the route constant (if exists)
-/// 2. Remove the GoRoute from the routes list
-/// 3. Remove any unused imports
-/// 4. Remove the feature directory if no longer needed
-///
-/// ## Route Parameters
-///
-/// To pass parameters to a route:
-/// ```dart
-/// GoRoute(
-///   path: '/user/:userId',
-///   name: 'UserDetail',
-///   builder: (BuildContext context, GoRouterState state) {
-///     final userId = state.pathParameters['userId'] ?? '';
-///     return UserDetailScreen(userId: userId);
-///   },
-/// ),
-/// ```
-///
-/// ## Query Parameters
-///
-/// To access query parameters:
-/// ```dart
-/// GoRoute(
-///   path: '/search',
-///   name: 'Search',
-///   builder: (BuildContext context, GoRouterState state) {
-///     final query = state.uri.queryParameters['q'] ?? '';
-///     return SearchScreen(query: query);
-///   },
-/// ),
-/// ```
+/// Add routes with: GoRoute(path: '/route', builder: ...)
+/// Navigate with: context.go('/route') or context.push('/route')
 class AppRouter {
   AppRouter._();
 
@@ -86,9 +19,7 @@ class AppRouter {
   static final GoRouter router = GoRouter(
     debugLogDiagnostics: true, // Set to false in production
     routes: <RouteBase>[
-      /// Home Route
-      ///
-      /// The main entry point of the application.
+      // Home Route
       GoRoute(
         path: _homePath,
         name: 'Home',
@@ -97,10 +28,7 @@ class AppRouter {
         },
       ),
 
-      /// Counter Route (Demo Feature)
-      ///
-      /// DEMO: This is a demonstration route that can be removed.
-      /// To remove: Delete this GoRoute block and the counter feature.
+      // Counter Route (DEMO - delete this block and counter feature)
       GoRoute(
         path: _counterPath,
         name: 'Counter',
@@ -109,15 +37,7 @@ class AppRouter {
         },
       ),
 
-      /// Add more routes here
-      /// Example:
-      /// GoRoute(
-      ///   path: '/settings',
-      ///   name: 'Settings',
-      ///   builder: (BuildContext context, GoRouterState state) {
-      ///     return const SettingsScreen();
-      ///   },
-      /// ),
+      // Add routes here: GoRoute(path: '/route', name: 'Route', builder: ...)
     ],
 
     // Error page for invalid routes
