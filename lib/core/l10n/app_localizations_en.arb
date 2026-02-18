@@ -1,0 +1,95 @@
+{
+  "@@locale": "en",
+  "appTitle": "Flutter App",
+  "@appTitle": {
+    "description": "The title of the application displayed in the task switcher and other system UI"
+  },
+  "homeTitle": "Home",
+  "@homeTitle": {
+    "description": "Title for the home screen"
+  },
+  "homeWelcome": "Welcome to the app!",
+  "@homeWelcome": {
+    "description": "Welcome message displayed on the home screen"
+  },
+  "counterTitle": "Counter Demo",
+  "@counterTitle": {
+    "description": "Title for the counter demo screen"
+  },
+  "counterDescription": "This is a demo feature that can be deleted.",
+  "@counterDescription": {
+    "description": "Description explaining the counter feature"
+  },
+  "counterIncrement": "Increment",
+  "@counterIncrement": {
+    "description": "Button label to increment the counter"
+  },
+  "counterDecrement": "Decrement",
+  "@counterDecrement": {
+    "description": "Button label to decrement the counter"
+  },
+  "counterReset": "Reset",
+  "@counterReset": {
+    "description": "Button label to reset the counter"
+  },
+  "counterCount": "Count",
+  "@counterCount": {
+    "description": "Label for the counter value"
+  },
+  "commonLoading": "Loading...",
+  "@commonLoading": {
+    "description": "Loading indicator text"
+  },
+  "commonError": "An error occurred",
+  "@commonError": {
+    "description": "Generic error message"
+  },
+  "commonRetry": "Retry",
+  "@commonRetry": {
+    "description": "Button label to retry an action"
+  },
+  "commonCancel": "Cancel",
+  "@commonCancel": {
+    "description": "Button label to cancel an action"
+  },
+  "commonConfirm": "Confirm",
+  "@commonConfirm": {
+    "description": "Button label to confirm an action"
+  },
+  "commonSave": "Save",
+  "@commonSave": {
+    "description": "Button label to save data"
+  },
+  "commonDelete": "Delete",
+  "@commonDelete": {
+    "description": "Button label to delete an item"
+  },
+  "commonEdit": "Edit",
+  "@commonEdit": {
+    "description": "Button label to edit an item"
+  },
+  "commonClose": "Close",
+  "@commonClose": {
+    "description": "Button label to close a dialog or screen"
+  },
+  "commonBack": "Back",
+  "@commonBack": {
+    "description": "Button label to go back"
+  },
+  "commonNext": "Next",
+  "@commonNext": {
+    "description": "Button label to go to the next step"
+  },
+  "commonDone": "Done",
+  "@commonDone": {
+    "description": "Button label to complete an action"
+  },
+  "reset": "Reset",
+  "@reset": {
+    "description": "Button label to reset the counter"
+  },
+  "count": "Count",
+  "@count": {
+    "description": "Label for the counter value"
+  }
+}

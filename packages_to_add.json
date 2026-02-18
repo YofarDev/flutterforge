@@ -1,0 +1,16 @@
+{
+    "dependencies":
+    [
+        "flutter_bloc",
+        "equatable",
+        "nested",
+        "go_router",
+        "freezed"
+    ],
+    "dev_dependencies":
+    [
+        "flutter_lints",
+        "bloc_test",
+        "mocktail"
+    ]
+}
