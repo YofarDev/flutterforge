@@ -2,6 +2,12 @@
 # This provides a comprehensive set of best practices maintained by the Flutter team
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    - '**/*.g.dart'
+    - '**/*.freezed.dart'
+
+
 linter:
   rules:
     # ------ Parameter Ordering ------ #
