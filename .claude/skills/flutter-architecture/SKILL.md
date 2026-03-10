@@ -1,6 +1,6 @@
 ---
 name: flutter-architecture
-description: Use when creating new Flutter features, refactoring existing Flutter code, setting up project structure, implementing BLoC patterns, code reviews, or when users mention Flutter best practices, clean architecture, or maintainability concerns. Also use when adding LLM agent tools, wiring new cubits, modifying service_locator.dart, or any time a change might affect multiple features. Triggers include: "create feature", "refactor this", "project structure", "BLoC pattern", "code review", "best practices", "add tool", "new cubit", "dependency injection".
+description: Use when creating new Flutter features, refactoring existing Flutter code, setting up project structure, implementing BLoC patterns, code reviews, or when users mention Flutter best practices, clean architecture, or maintainability concerns. Also use when wiring new cubits, modifying service_locator.dart, or any time a change might affect multiple features. Triggers include: "create feature", "refactor this", "project structure", "BLoC pattern", "code review", "best practices", "new cubit", "dependency injection".
 license: MIT
 ---
 
@@ -18,7 +18,6 @@ license: MIT
 | Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz) |
 | DI | `get_it` — **all wiring in `service_locator.dart` only** |
 | Cubit deps | **Cubits never depend on other cubits** — use domain services |
-| Agent tools | One file per tool, self-describing, registered in `tool_registry.dart` only |
 
 ---
 
@@ -29,19 +28,8 @@ lib/
 ├── main.dart              # runApp() only — no wiring, no logic
 ├── app.dart               # MaterialApp.router + MultiBlocProvider (reads getIt only)
 ├── core/
-│   ├── agent/             # LLM agent layer — first-class, not buried in services/
-│   │   ├── agent.dart              # AgentInterface
-│   │   ├── agent_result.dart       # sealed: text | tool_call | error
-│   │   ├── tool_registry.dart      # ONLY file that changes when adding a tool
-│   │   └── tools/                  # one file per tool
-│   │       ├── weather_tool.dart
-│   │       ├── search_tool.dart
-│   │       └── ...
-│   ├── audio/             # TTS, playback, amplitude — all audio in one place
-│   ├── avatar/            # Animation service, avatar state
 │   ├── di/
 │   │   └── service_locator.dart   # Single source of truth for all wiring
-│   ├── llm/               # LLM services, streaming, config
 │   ├── router/
 │   │   ├── app_router.dart
 │   │   └── route_constants.dart
@@ -68,7 +56,7 @@ lib/
 
 ---
 
-## The Two Wiring Rules (Most Important)
+## The Two Wiring Rules
 
 These two rules prevent the majority of "add a feature, break something else" regressions.
 
@@ -86,39 +74,41 @@ MultiBlocProvider(
   child: MaterialApp.router(...),
 )
 
-// ❌ WRONG — constructing manually bypasses DI and drifts from service_locator
+// ❌ WRONG — constructing manually bypasses DI and creates a second wiring layer
 BlocProvider(
-  create: (context) => ChatMessageCubit(
-    chatAudioCubit: getIt<ChatAudioCubit>(),       // now wired in two places
-    chatStreamingCubit: context.read<ChatStreamingCubit>(),
+  create: (context) => MyCubit(
+    repo: getIt<MyRepository>(),
+    other: context.read<OtherCubit>(), // now wired in two places
   ),
 )
 ```
 
 ### Rule 2: Cubits never depend on other cubits
 
-If two cubits need to coordinate, that coordination belongs in a **domain service**, not as a direct constructor dependency between cubits. This is the #1 source of fragility in LLM-assisted codebases because agents will always find the shortest path — and the shortest path is usually adding a cubit dependency.
+If two cubits need to coordinate, that coordination belongs in a **domain service**, not as a direct constructor dependency. This is the #1 source of fragility in LLM-assisted codebases — agents always find the shortest path, and the shortest path is usually a cubit dependency.
 
 ```dart
-// ❌ WRONG — ChatTtsCubit depending on TalkingCubit
-class ChatTtsCubit extends Cubit<ChatTtsState> {
-  final TalkingCubit _talkingCubit; // cross-cubit dependency = fragile
+// ❌ WRONG — direct cubit-to-cubit dependency
+class NotificationCubit extends Cubit<NotificationState> {
+  final AuthCubit _authCubit; // fragile cross-cubit coupling
 }
 
 // ✅ CORRECT — both cubits depend on a shared domain service
-class TalkingCoordinatorService {
-  void onTtsStarted() { ... }
-  void onTtsStopped() { ... }
+class SessionService {
+  void onUserLoggedIn(User user) { ... }
+  void onUserLoggedOut() { ... }
 }
 
-class ChatTtsCubit extends Cubit<ChatTtsState> {
-  final TalkingCoordinatorService _coordinator;
+class NotificationCubit extends Cubit<NotificationState> {
+  final SessionService _session;
 }
 
-class TalkingCubit extends Cubit<TalkingState> {
-  final TalkingCoordinatorService _coordinator;
+class AuthCubit extends Cubit<AuthState> {
+  final SessionService _session;
 }
 ```
+
+> **Signal:** If you find yourself writing a comment like *"must be singleton so both X and Y use the same instance"* — that's a hidden coupling. Extract a domain service instead.
 
 ---
 
@@ -144,66 +134,42 @@ state.when(
 
 ---
 
-## Cubit Sizing — Split by User-Visible State, Not SRP Micro-Splits
+## Cubit Sizing
 
-Too many micro-cubits creates coordination complexity that is worse than the problem it solves. Split when a cubit handles two genuinely independent UI concerns, not just because a file is long.
+Split by **user-visible state boundaries**, not by SRP micro-splits. Too many micro-cubits creates coordination complexity that is worse than the problem it solves.
 
 ```
-// ❌ TOO GRANULAR — 7 cubits for one feature creates hidden coordination deps
+// ❌ TOO GRANULAR — hidden coordination deps between 5+ cubits
 chat_audio_cubit.dart
-chat_list_cubit.dart
 chat_message_cubit.dart
 chat_streaming_cubit.dart
 chat_title_cubit.dart
 chat_tts_cubit.dart
-chats_cubit.dart
 
-// ✅ BETTER — split along visible UI state boundaries
-chat_cubit.dart          # messages, streaming, title — the conversation
-chat_media_cubit.dart    # audio recording, image picking — media input
+// ✅ BETTER — split along visible UI concerns
+chat_cubit.dart          # the conversation: messages, streaming, title
+chat_media_cubit.dart    # media input: audio recording, image picking
 ```
 
 Coordination logic that previously lived *between* micro-cubits moves *into* the cubit or into a domain service.
 
 ---
 
-## Agent Tool Pattern
+## Cubit vs BLoC
 
-Adding a new capability should require touching **exactly one file** beyond the new tool itself.
+Use **Cubit** by default (90% of cases). Only use full BLoC when you need event transformers.
 
 ```dart
-// core/agent/tools/weather_tool.dart — self-contained
-class WeatherTool implements AgentTool {
-  @override
-  String get name => 'getCurrentWeather';
-
-  @override
-  String get description => 'Get current weather for a location';
-
-  @override
-  Map<String, dynamic> get schema => {
-    'type': 'object',
-    'properties': {
-      'location': {'type': 'string', 'description': 'City name'},
-    },
-    'required': ['location'],
-  };
-
-  @override
-  Future<AgentResult> execute(Map<String, dynamic> args) async {
-    final location = args['location'] as String;
-    // implementation
+// Use BLoC only when you need debounce / switchMap / throttle
+class SearchBloc extends Bloc<SearchEvent, SearchState> {
+  SearchBloc(this._repo) : super(const SearchState.initial()) {
+    on<QueryChanged>(
+      _onQueryChanged,
+      transformer: (events, mapper) => events
+          .debounceTime(const Duration(milliseconds: 300))
+          .switchMap(mapper),
+    );
   }
-}
-
-// core/agent/tool_registry.dart — THE ONLY FILE THAT CHANGES when adding a tool
-class ToolRegistry {
-  static final List<AgentTool> tools = [
-    WeatherTool(),
-    NewsTool(),
-    SearchTool(),
-    // Add new tool here — nothing else needs to change
-  ];
 }
 ```
 
@@ -223,7 +189,7 @@ MultiBlocListener(
     ),
     BlocListener<SettingsCubit, SettingsState>(
       listenWhen: (prev, curr) => prev.theme != curr.theme,
-      listener: (context, state) { /* theme change side effect */ },
+      listener: (context, state) { /* side effect */ },
     ),
   ],
   child: Scaffold(...),
@@ -260,6 +226,20 @@ class AuthRepositoryImpl implements IAuthRepository {
 
 ---
 
+## Singleton vs Factory in service_locator.dart
+
+The choice must be explicit and consistent:
+
+```dart
+// Singleton — shared mutable state, single source of truth
+getIt.registerLazySingleton<TtsService>(() => TtsService());
+
+// Factory — fresh instance per screen/widget lifecycle
+getIt.registerFactory<AuthCubit>(() => AuthCubit(getIt<IAuthRepository>()));
+```
+
+---
+
 ## Anti-Patterns (Never Do)
 
 | ❌ Wrong | ✅ Fix |
@@ -274,42 +254,19 @@ class AuthRepositoryImpl implements IAuthRepository {
 | Cubit depending on another cubit | Extract shared logic to domain service |
 | `context.read` after `await` | Capture reference before the `await` |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
-| 8 cubits for one feature | Split by UI concern, move coordination to services |
-| New agent tool scattered across files | One tool file + one line in `tool_registry.dart` |
-
----
-
-## Singleton vs Factory Decision
-
-In `service_locator.dart`, the choice must be explicit and documented:
-
-```dart
-// Singleton — shared mutable state, single source of truth
-getIt.registerLazySingleton<TtsService>(() => TtsService());
-
-// Factory — fresh instance per screen/widget lifecycle
-getIt.registerFactory<AuthCubit>(() => AuthCubit(getIt<IAuthRepository>()));
-
-// ⚠️ If you add a comment like "must be singleton so both X and Y use the same instance"
-// — that is a signal that X and Y have a hidden coupling.
-// Consider extracting the shared concern to a domain service instead.
-```
 
 ---
 
 ## Adding a New Feature — Checklist
 
-Before writing any code, answer these:
-
-1. **Does this need a new feature folder, or does it extend an existing one?**
-2. **What state does the UI need?** — Design the freezed state first
-3. **What repository interface does the cubit call?** — Define the interface before the implementation
-4. **Does the new cubit need to react to another cubit's state?** — If yes, extract a domain service instead of adding a cubit dependency
-5. **If adding an agent tool:** create the tool file, add one line to `tool_registry.dart`, done
+1. **New feature folder or extension of existing?** — decide before writing any code
+2. **Design the freezed state first** — what does the UI actually need?
+3. **Define the repository interface before the implementation**
+4. **Does the new cubit need to react to another cubit?** — if yes, extract a domain service instead
+5. **Register in `service_locator.dart` only** — never wire in `app.dart` or screens
 
 ---
 
 ## See Also
 - `examples.md` — Cubit vs BLoC, DI setup, routing examples
 - `anti-patterns.md` — Common mistakes with before/after fixes
-- `RED_TEST_SCENARIOS.md` — Test scenarios to validate architecture decisions

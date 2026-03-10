@@ -255,36 +255,6 @@ while IFS= read -r f; do
 done < <(dart_files)
 [[ "$FOUND" -eq 0 ]] && info "✅ None detected"
 
-# ── 8. Agent tool scatter ────────────────────────────────────
-h2 "Agent / LLM tool scatter"
-
-AGENT_DIR="$LIB_DIR/core/agent"
-TOOLS_IN_AGENT=0
-[[ -d "$AGENT_DIR/tools" ]] && TOOLS_IN_AGENT=$(find "$AGENT_DIR/tools" -name "*.dart" ! -name "*.g.dart" | wc -l | tr -d ' ')
-
-# Tools living outside core/agent/tools/
-SCATTERED=$(dart_files | xargs grep -l "AgentTool\|implements.*Tool\b\|FunctionTool" 2>/dev/null \
-  | grep -v "$AGENT_DIR" \
-  | grep -v "_test\.dart" || true)
-
-if [[ -n "$SCATTERED" ]]; then
-  info "⚠️  **Tool implementations found outside \`core/agent/tools/\`**:"
-  while IFS= read -r f; do
-    info "- \`${f#$PROJECT_DIR/}\`"
-  done <<< "$SCATTERED"
-elif [[ "$TOOLS_IN_AGENT" -gt 0 ]]; then
-  info "✅ $TOOLS_IN_AGENT tool(s) correctly in \`core/agent/tools/\`"
-else
-  info "ℹ️  No agent tools detected (or not yet using AgentTool interface)"
-fi
-
-REGISTRY=$(dart_files | grep -E 'tool_registry\.dart' | head -1 || true)
-if [[ -n "$REGISTRY" ]]; then
-  info "✅ tool_registry.dart found: \`${REGISTRY#$PROJECT_DIR/}\`"
-else
-  info "⚠️  No \`tool_registry.dart\` found — tools may be registered ad-hoc"
-fi
-
 # ── 9. Routing ───────────────────────────────────────────────
 h2 "Routing"
 ROUTER_FILE=$(dart_files | grep -E 'app_router\.dart|router\.dart' | head -1 || true)

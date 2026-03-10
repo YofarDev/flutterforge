@@ -15,12 +15,8 @@ Structured analysis against `flutter-architecture` standards. Produces a priorit
 
 ## Step 1 — Pre-Analysis
 
-Run `fanal` if available. It covers: file tree, feature map, file sizes, cross-feature imports,
-anti-patterns, DI wiring integrity, cubit coupling, agent tool scatter, routing, test coverage.
-
-```bash
-./fanal.sh [path/to/project]
-```
+Run `fanal` (in current folder) if available. It covers: file tree, feature map, file sizes, cross-feature imports,
+anti-patterns, DI wiring integrity, cubit coupling, routing, test coverage.
 
 If unavailable, run these targeted greps manually:
 
@@ -35,10 +31,6 @@ grep -rn "final.*Cubit\|final.*Bloc\b" lib/features/**/bloc/ --include="*.dart"
 # Cross-feature imports
 grep -rn "import.*features/" lib/features/ --include="*.dart" \
   | awk -F: '{print $1, $3}' | grep -v "self"
-
-# Agent tools outside core/agent/tools/
-grep -rln "AgentTool\|implements.*Tool\b" lib/ --include="*.dart" \
-  | grep -v "core/agent"
 ```
 
 ---
@@ -76,17 +68,12 @@ grep -rn "import.*data/" lib/features/*/presentation/ --include="*.dart"
 ### F. DI Integrity
 - Single `service_locator.dart` / `injection.dart`?
 - `app.dart` / `main.dart` using `getIt<>()` only, never constructing cubits manually?
-- Singleton vs factory choices documented and intentional?
+- Singleton vs factory choices consistent?
 
-### G. Cubit Coupling (most important for LLM-assisted projects)
+### G. Cubit Coupling
 - Any cubit with `final SomeCubit` or `final SomeBloc` as a field?
 - Any feature with >2 cubits that could be consolidated?
 - Coordination logic duplicated across cubits instead of extracted to a domain service?
-
-### H. Agent / Tool Layer
-- Tools defined in `core/agent/tools/`?
-- Single `tool_registry.dart` as the only registration point?
-- `YofardevAgent` / equivalent isolated behind an interface?
 
 ---
 
@@ -107,7 +94,6 @@ grep -rn "import.*data/" lib/features/*/presentation/ --include="*.dart"
 | Presentation | ✅/⚠️/❌ | n |
 | DI Integrity | ✅/⚠️/❌ | n |
 | Cubit Coupling | ✅/⚠️/❌ | n |
-| Agent / Tool Layer | ✅/⚠️/❌ | n |
 | Routing | ✅/⚠️/❌ | n |
 | Models | ✅/⚠️/❌ | n |
 | Standards | ✅/⚠️/❌ | n |
@@ -139,26 +125,19 @@ This section is the primary output when the user asks for a refactoring plan.
 The goal is **safe, incremental migration** — each phase must leave the app in a
 working state. Never propose a big-bang rewrite.
 
-### How to sequence phases
+### Phase sequencing — always this order
 
-Order phases by this priority:
-1. **DI integrity first** — fix dual wiring before anything else, or every subsequent
-   change risks a hidden second-wiring regression
-2. **Cubit decoupling second** — extract domain services to break cubit-to-cubit deps;
-   this unlocks safe consolidation in the next phase
+1. **DI integrity first** — fix dual wiring before anything else, or every subsequent change risks a hidden second-wiring regression
+2. **Cubit decoupling second** — extract domain services to break cubit-to-cubit deps; this unlocks safe consolidation
 3. **Cubit consolidation third** — only merge cubits after their deps are clean
-4. **Feature boundary cleanup** — remove cross-feature imports, route through core/
-5. **Agent layer promotion** — move tools to core/agent/tools/, introduce tool_registry
-6. **Presentation polish** — BlocBuilder scope, MultiBlocListener, file sizes
-
-### Migration plan format
+4. **Feature boundary cleanup** — remove cross-feature imports, route through `core/`
+5. **Presentation polish** — BlocBuilder scope, MultiBlocListener, file sizes
 
 ---
 
 ### 🗺️ Incremental Migration Plan
 
-**Guiding principle:** Each phase is independently deployable. The app must compile
-and run after every phase.
+**Guiding principle:** Each phase is independently deployable. The app must compile and run after every phase.
 
 ---
 
@@ -166,10 +145,9 @@ and run after every phase.
 
 **Goal:** Single source of truth for all wiring.
 
-**Changes:**
 - [ ] Move manual cubit constructions from `app.dart`/`main.dart` into `service_locator.dart`
-- [ ] Replace every `context.read<XCubit>()` passed as constructor arg with `getIt<XCubit>()`
-- [ ] Add comment block to `service_locator.dart`: `// Singletons` / `// Factories` sections
+- [ ] Replace every cubit constructed via `context.read` passed as constructor arg with `getIt<>()`
+- [ ] Add `// Singletons` / `// Factories` comment sections to `service_locator.dart`
 
 **Safe because:** Pure mechanical move — behavior unchanged, just wiring location.
 
@@ -188,7 +166,8 @@ Register in service_locator as: lazySingleton
 Replace in: [list of files]
 ```
 
-**Safe because:** New service is additive; old cubits keep working until wired to service.
+**Safe because:** New service is additive; old cubits keep working until switched over.
+**Do one dependency at a time** — commit after each.
 
 ---
 
@@ -198,12 +177,12 @@ Replace in: [list of files]
 
 For each over-split feature:
 ```
-[feature]: [list of cubits] → consolidate into [ChatCubit, ChatMediaCubit]
-State to merge: [list of states]
+[feature]: [list of current cubits] → consolidate into [NewCubit, NewMediaCubit]
+State to merge: [list]
 Methods to move: [list]
 ```
 
-**Do not start this phase until Phase 2 is complete.**
+**Do not start until Phase 2 is complete.**
 
 ---
 
@@ -213,24 +192,13 @@ Methods to move: [list]
 
 For each violation:
 ```
-[importing feature] imports [exported feature]
+[importing feature] imports [target feature]
 Move shared code to: core/[module]/
 ```
 
 ---
 
-#### Phase 5 — Agent Layer Promotion _(~N files, low risk)_
-
-**Goal:** All tools in `core/agent/tools/`, single `tool_registry.dart`.
-
-- [ ] Create `core/agent/` directory structure
-- [ ] Move each tool file (one commit per tool — safe to pause mid-phase)
-- [ ] Create `tool_registry.dart` with consolidated list
-- [ ] Update `service_locator.dart` to register from registry only
-
----
-
-#### Phase 6 — Presentation Polish _(ongoing)_
+#### Phase 5 — Presentation Polish _(ongoing)_
 
 **Goal:** Clean presentation layer — no unnecessary rebuilds, no nested listeners.
 
@@ -249,17 +217,16 @@ Move shared code to: core/[module]/
 | 2 — Cubit decoupling | N | Medium | ✅ Yes (one dep at a time) |
 | 3 — Consolidation | N | Medium | ⚠️ Review each merge |
 | 4 — Feature boundaries | N | Low | ✅ Yes |
-| 5 — Agent layer | N | Low | ✅ Yes |
-| 6 — Presentation | N | Low | ✅ Yes |
+| 5 — Presentation | N | Low | ✅ Yes |
 
 ---
 
 ## Rules
 
-- **Script first, files second.** Use `fanal` if available — don't grep manually what the script already covers.
+- **Script first, files second.** Use `fanal` if available.
 - **Be specific.** Every issue names a file and line number.
 - **Distinguish severity.** Cross-feature import → critical. Missing `listenWhen` → suggestion.
-- **Migration plan always included** when the user has refactoring intent — don't just list problems.
+- **Migration plan always included** when the user has refactoring intent.
 - **Phases must be safe.** Never propose a change that breaks compilation mid-phase.
 - **Don't pad.** Compliant category = one line in the summary table.
 - **Offer to execute.** After the plan, ask: "Which phase would you like me to start with?"
