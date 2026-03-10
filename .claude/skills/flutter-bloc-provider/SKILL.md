@@ -1,6 +1,6 @@
 ---
 name: flutter-bloc-provider
-description: Use when writing or scaffolding Flutter code that uses bloc, flutter_bloc, or cubit — including creating screens, routes, widgets, or main.dart. Triggers include: BLoC, Cubit, MultiBlocProvider, BlocProvider, context.read, context.watch, context.select, generating Flutter features with cubit/bloc. This skill ensures correct provider scoping so the "Could not find correct Provider above this Widget" error never appears.
+description: Use only when diagnosing or fixing a 'Could not find Provider' runtime error, when writing dialog/bottom sheet code that needs a cubit, or when using Navigator.push (not go_router) with a cubit. For all other cubit/BLoC work, use flutter-architecture instead.
 license: MIT
 ---
 

@@ -1,45 +1,63 @@
 ---
 name: flutter-audit
-description: Use when the user wants a deep analysis, code review, or audit of an existing Flutter project. Triggers include: 'review my Flutter project', 'audit my codebase', 'what's wrong with my architecture', 'check my BLoC structure', 'analyze my Flutter app', or when the user shares Flutter files/folders and asks for feedback. This skill checks compliance against the flutter-architecture standards and produces a structured, actionable report.
+description: Use when the user wants a deep analysis, code review, audit, or incremental refactoring plan for an existing Flutter project. Triggers include: 'review my Flutter project', 'audit my codebase', 'what's wrong with my architecture', 'check my BLoC structure', 'analyze my Flutter app', 'refactoring plan', 'migrate my architecture', or when the user shares Flutter files/folders and asks for feedback. This skill checks compliance against flutter-architecture standards and produces a structured, actionable report with an incremental migration plan.
 license: MIT
 ---
 
 # Flutter Architecture Audit
 
-Structured analysis against `flutter-architecture` standards. Produces prioritized, actionable report.
+Structured analysis against `flutter-architecture` standards. Produces a prioritized report
+**plus an incremental migration plan** so the codebase can be improved safely, one step at a time.
 
-**Read `flutter-architecture` before auditing.**
+**Always read `flutter-architecture` skill before auditing.**
 
-## Step 1 — Pre-Analysis (Optional)
+---
 
-If `fanal` script exists:
+## Step 1 — Pre-Analysis
+
+Run `fanal` if available. It covers: file tree, feature map, file sizes, cross-feature imports,
+anti-patterns, DI wiring integrity, cubit coupling, agent tool scatter, routing, test coverage.
+
 ```bash
-fanal
+./fanal.sh [path/to/project]
 ```
 
-Covers: feature map, file sizes, cross-feature imports, anti-patterns, state design, DI stats, test coverage.
+If unavailable, run these targeted greps manually:
 
-**If unavailable**, proceed to Step 2.
+```bash
+# Dual wiring — cubits constructed outside service_locator
+grep -rn "Cubit(\|Bloc(" lib/ --include="*.dart" \
+  | grep -v "_cubit.dart\|_bloc.dart\|_state.dart\|_test.dart\|service_locator"
+
+# Cubit-to-cubit dependencies
+grep -rn "final.*Cubit\|final.*Bloc\b" lib/features/**/bloc/ --include="*.dart"
+
+# Cross-feature imports
+grep -rn "import.*features/" lib/features/ --include="*.dart" \
+  | awk -F: '{print $1, $3}' | grep -v "self"
+
+# Agent tools outside core/agent/tools/
+grep -rln "AgentTool\|implements.*Tool\b" lib/ --include="*.dart" \
+  | grep -v "core/agent"
+```
+
+---
 
 ## Step 2 — Deep Analysis
 
 ### A. BLoC vs Cubit
-For each `*_bloc.dart`:
-- Is `EventTransformer` (debounce/throttle/switchMap) used?
-- If not → should be Cubit
+For each `*_bloc.dart`: is `EventTransformer` (debounce/throttle/switchMap) used?
+If not → should be Cubit.
 
 ### B. State Exhaustiveness
-For `@freezed` states:
-- All states handled with `.when()`/`.maybeWhen()`?
-- Or raw `if (state is X)` checks?
+Are all freezed states handled with `.when()`? Or raw `if (state is X)` checks?
 
 ```bash
 grep -rn "is _\|state ==" lib/features/*/presentation/ --include="*.dart"
 ```
 
 ### C. Error Handling
-- Repositories return `Either<Failure, T>` or throw?
-- Cubits emit typed failure states or swallow silently?
+Do repositories return `Either<Failure, T>` or throw? Do cubits emit typed failure states?
 
 ```bash
 grep -A3 "} catch" lib/features/*/presentation/bloc/ --include="*.dart" | grep -v "emit"
@@ -48,19 +66,31 @@ grep -A3 "} catch" lib/features/*/presentation/bloc/ --include="*.dart" | grep -
 ### D. Presentation Scope
 - `BlocBuilder` wrapping full `Scaffold`? (unnecessary rebuilds)
 - `BlocConsumer` where `BlocListener` suffices?
-- Nested `BlocListener` widgets? (use `MultiBlocListener`)
+- Nested `BlocListener` widgets?
 
 ### E. Layer Violations
 ```bash
 grep -rn "import.*data/" lib/features/*/presentation/ --include="*.dart"
 ```
 
-### F. Dependencies
-- `flutter_bloc`, `get_it`, `go_router`, `freezed` present?
-- No `http` where API abstraction needed?
-- No conflicting state packages (provider, riverpod)?
+### F. DI Integrity
+- Single `service_locator.dart` / `injection.dart`?
+- `app.dart` / `main.dart` using `getIt<>()` only, never constructing cubits manually?
+- Singleton vs factory choices documented and intentional?
 
-## Step 3 — Report Format
+### G. Cubit Coupling (most important for LLM-assisted projects)
+- Any cubit with `final SomeCubit` or `final SomeBloc` as a field?
+- Any feature with >2 cubits that could be consolidated?
+- Coordination logic duplicated across cubits instead of extracted to a domain service?
+
+### H. Agent / Tool Layer
+- Tools defined in `core/agent/tools/`?
+- Single `tool_registry.dart` as the only registration point?
+- `YofardevAgent` / equivalent isolated behind an interface?
+
+---
+
+## Step 3 — Audit Report
 
 ---
 
@@ -75,7 +105,9 @@ grep -rn "import.*data/" lib/features/*/presentation/ --include="*.dart"
 | State Design | ✅/⚠️/❌ | n |
 | Error Handling | ✅/⚠️/❌ | n |
 | Presentation | ✅/⚠️/❌ | n |
-| DI | ✅/⚠️/❌ | n |
+| DI Integrity | ✅/⚠️/❌ | n |
+| Cubit Coupling | ✅/⚠️/❌ | n |
+| Agent / Tool Layer | ✅/⚠️/❌ | n |
 | Routing | ✅/⚠️/❌ | n |
 | Models | ✅/⚠️/❌ | n |
 | Standards | ✅/⚠️/❌ | n |
@@ -83,32 +115,151 @@ grep -rn "import.*data/" lib/features/*/presentation/ --include="*.dart"
 ---
 
 #### 🔴 Critical Issues
-_Architecture violations or bugs. Fix first._
+_Architecture violations that cause cascading breakage. Fix before adding features._
 
 ```
 [CATEGORY] Title
 File: path/to/file.dart (line N)
-Problem: What's wrong and why.
-Fix: Concrete code or instruction.
+Problem: What's wrong and why it causes breakage.
+Fix: Concrete code or step-by-step instruction.
+Migration risk: low / medium / high
 ```
 
 #### 🟡 Warnings
-_Maintenance burden. Same format._
+_Maintenance burden — won't break today but will compound. Same format._
 
 #### 🟢 Suggestions
 _Minor improvements. Same format._
 
 ---
 
-#### Recommended Fix Order
-_Numbered, most impactful first._
+## Step 4 — Incremental Migration Plan
+
+This section is the primary output when the user asks for a refactoring plan.
+The goal is **safe, incremental migration** — each phase must leave the app in a
+working state. Never propose a big-bang rewrite.
+
+### How to sequence phases
+
+Order phases by this priority:
+1. **DI integrity first** — fix dual wiring before anything else, or every subsequent
+   change risks a hidden second-wiring regression
+2. **Cubit decoupling second** — extract domain services to break cubit-to-cubit deps;
+   this unlocks safe consolidation in the next phase
+3. **Cubit consolidation third** — only merge cubits after their deps are clean
+4. **Feature boundary cleanup** — remove cross-feature imports, route through core/
+5. **Agent layer promotion** — move tools to core/agent/tools/, introduce tool_registry
+6. **Presentation polish** — BlocBuilder scope, MultiBlocListener, file sizes
+
+### Migration plan format
+
+---
+
+### 🗺️ Incremental Migration Plan
+
+**Guiding principle:** Each phase is independently deployable. The app must compile
+and run after every phase.
+
+---
+
+#### Phase 1 — DI Integrity _(~N files, low risk)_
+
+**Goal:** Single source of truth for all wiring.
+
+**Changes:**
+- [ ] Move manual cubit constructions from `app.dart`/`main.dart` into `service_locator.dart`
+- [ ] Replace every `context.read<XCubit>()` passed as constructor arg with `getIt<XCubit>()`
+- [ ] Add comment block to `service_locator.dart`: `// Singletons` / `// Factories` sections
+
+**Safe because:** Pure mechanical move — behavior unchanged, just wiring location.
+
+---
+
+#### Phase 2 — Break Cubit-to-Cubit Dependencies _(~N files, medium risk)_
+
+**Goal:** No cubit holds a reference to another cubit.
+
+For each cubit-to-cubit dependency found:
+
+```
+[SourceCubit] → [TargetCubit]
+Extract: [SharedConcernService]
+Register in service_locator as: lazySingleton
+Replace in: [list of files]
+```
+
+**Safe because:** New service is additive; old cubits keep working until wired to service.
+
+---
+
+#### Phase 3 — Cubit Consolidation _(~N files, medium risk)_
+
+**Goal:** Max 2 cubits per feature. Coordination logic lives in domain services.
+
+For each over-split feature:
+```
+[feature]: [list of cubits] → consolidate into [ChatCubit, ChatMediaCubit]
+State to merge: [list of states]
+Methods to move: [list]
+```
+
+**Do not start this phase until Phase 2 is complete.**
+
+---
+
+#### Phase 4 — Feature Boundary Cleanup _(~N files, low risk)_
+
+**Goal:** Zero cross-feature imports.
+
+For each violation:
+```
+[importing feature] imports [exported feature]
+Move shared code to: core/[module]/
+```
+
+---
+
+#### Phase 5 — Agent Layer Promotion _(~N files, low risk)_
+
+**Goal:** All tools in `core/agent/tools/`, single `tool_registry.dart`.
+
+- [ ] Create `core/agent/` directory structure
+- [ ] Move each tool file (one commit per tool — safe to pause mid-phase)
+- [ ] Create `tool_registry.dart` with consolidated list
+- [ ] Update `service_locator.dart` to register from registry only
+
+---
+
+#### Phase 6 — Presentation Polish _(ongoing)_
+
+**Goal:** Clean presentation layer — no unnecessary rebuilds, no nested listeners.
+
+- [ ] Narrow `BlocBuilder` scopes (wrap only dependent widgets)
+- [ ] Replace nested `BlocListener`s with `MultiBlocListener`
+- [ ] Extract widget helper methods (`_buildX`) to separate widget classes
+- [ ] Enforce file size limits (300/400 lines)
+
+---
+
+### Estimated effort
+
+| Phase | Files affected | Risk | Can be done by LLM agent alone? |
+|-------|---------------|------|----------------------------------|
+| 1 — DI integrity | N | Low | ✅ Yes |
+| 2 — Cubit decoupling | N | Medium | ✅ Yes (one dep at a time) |
+| 3 — Consolidation | N | Medium | ⚠️ Review each merge |
+| 4 — Feature boundaries | N | Low | ✅ Yes |
+| 5 — Agent layer | N | Low | ✅ Yes |
+| 6 — Presentation | N | Low | ✅ Yes |
 
 ---
 
 ## Rules
 
-- **Script first, files second.** Use `fanal` if available.
-- **Be specific.** Every issue must name a file.
+- **Script first, files second.** Use `fanal` if available — don't grep manually what the script already covers.
+- **Be specific.** Every issue names a file and line number.
 - **Distinguish severity.** Cross-feature import → critical. Missing `listenWhen` → suggestion.
-- **Don't pad.** Compliant category = one line.
-- **Offer to fix.** Ask: "Would you like me to fix any of these?"
+- **Migration plan always included** when the user has refactoring intent — don't just list problems.
+- **Phases must be safe.** Never propose a change that breaks compilation mid-phase.
+- **Don't pad.** Compliant category = one line in the summary table.
+- **Offer to execute.** After the plan, ask: "Which phase would you like me to start with?"

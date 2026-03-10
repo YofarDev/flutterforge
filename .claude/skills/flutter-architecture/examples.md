@@ -137,6 +137,8 @@ final router = GoRouter(
 ## Repository with Typed Errors
 
 ```dart
+import 'package:fpdart/fpdart.dart';
+
 // Repository interface (domain layer)
 abstract class IAuthRepository {
   Future<Either<Failure, User>> login(String email, String password);
