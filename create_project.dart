@@ -169,11 +169,15 @@ void main(List<String> args) async {
   print('🌐 Generating localization files...');
   await _runCommand('flutter', ['gen-l10n']);
 
-  // 15. Copy README.md
-  final readmeSource = File('${scriptDir.path}/README.md');
-  if (readmeSource.existsSync()) {
-    print('📄 Copying README.md...');
-    readmeSource.copySync('README.md');
+  // 15. Setup README.md
+  final readmeTemplate = File('${scriptDir.path}/template-README.md');
+  if (readmeTemplate.existsSync()) {
+    print('📄 Setting up README.md from template...');
+    var readmeContent = readmeTemplate.readAsStringSync();
+    readmeContent = readmeContent.replaceAll('{PROJECT_NAME}', projectName);
+    File('README.md').writeAsStringSync(readmeContent);
+  } else {
+    print('⚠️  Warning: template-README.md not found. Skipping README setup.');
   }
 
   // 16. Replace placeholder package name
