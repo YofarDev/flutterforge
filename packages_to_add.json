@@ -6,6 +6,7 @@
         "nested",
         "go_router",
         "freezed_annotation",
+        "json_annotation",
         "get_it",
         "fpdart"
     ],

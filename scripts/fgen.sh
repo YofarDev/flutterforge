@@ -84,7 +84,7 @@ part '${FEATURE_SNAKE}.freezed.dart';
 part '${FEATURE_SNAKE}.g.dart';
 
 @freezed
-class ${FEATURE_PASCAL} with _\$${FEATURE_PASCAL} {
+abstract class ${FEATURE_PASCAL} with _\$${FEATURE_PASCAL} {
   const factory ${FEATURE_PASCAL}({
     required String id,
     @Default('') String name,
@@ -139,7 +139,7 @@ part '${FEATURE_SNAKE}_dto.freezed.dart';
 part '${FEATURE_SNAKE}_dto.g.dart';
 
 @freezed
-class ${FEATURE_PASCAL}Dto with _\$${FEATURE_PASCAL}Dto {
+abstract class ${FEATURE_PASCAL}Dto with _\$${FEATURE_PASCAL}Dto {
   const factory ${FEATURE_PASCAL}Dto({
     required String id,
     required String name,
@@ -183,10 +183,10 @@ class ${FEATURE_PASCAL}Repository implements I${FEATURE_PASCAL}Repository {
   @override
   Future<Either<Failure, ${FEATURE_PASCAL}>> getData() async {
     try {
-      final dto = await _dataSource.getData();
-      return Right(dto.toDomain());
+      final ${FEATURE_PASCAL}Dto dto = await _dataSource.getData();
+      return Right<Failure, ${FEATURE_PASCAL}>(dto.toDomain());
     } catch (e) {
-      return Left(Failure.serverError(message: e.toString()));
+      return Left<Failure, ${FEATURE_PASCAL}>(Failure.serverError(message: e.toString()));
     }
   }
 }
@@ -213,6 +213,9 @@ EOF
 # 9. Presentation Layer: Cubit
 cat > lib/features/$FEATURE_SNAKE/presentation/bloc/${FEATURE_SNAKE}_cubit.dart <<EOF
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:fpdart/fpdart.dart';
+import '../../../../core/models/failure.dart';
+import '../../domain/models/${FEATURE_SNAKE}.dart';
 import '../../domain/services/${FEATURE_SNAKE}_service.dart';
 import '${FEATURE_SNAKE}_state.dart';
 
@@ -223,10 +226,10 @@ class ${FEATURE_PASCAL}Cubit extends Cubit<${FEATURE_PASCAL}State> {
 
   Future<void> loadData() async {
     emit(const ${FEATURE_PASCAL}State.loading());
-    final result = await _service.getData();
+    final Either<Failure, ${FEATURE_PASCAL}> result = await _service.getData();
     result.fold(
-      (failure) => emit(${FEATURE_PASCAL}State.error(failure.message)),
-      (data) => emit(${FEATURE_PASCAL}State.loaded(data)),
+      (Failure failure) => emit(${FEATURE_PASCAL}State.error(failure.message)),
+      (${FEATURE_PASCAL} data) => emit(${FEATURE_PASCAL}State.loaded(data)),
     );
   }
 }
@@ -236,6 +239,7 @@ EOF
 cat > lib/features/$FEATURE_SNAKE/presentation/screens/${FEATURE_SNAKE}_screen.dart <<EOF
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../domain/models/${FEATURE_SNAKE}.dart';
 import '../bloc/${FEATURE_SNAKE}_cubit.dart';
 import '../bloc/${FEATURE_SNAKE}_state.dart';
 
@@ -249,12 +253,12 @@ class ${FEATURE_PASCAL}Screen extends StatelessWidget {
         title: const Text('${FEATURE_PASCAL}'),
       ),
       body: BlocBuilder<${FEATURE_PASCAL}Cubit, ${FEATURE_PASCAL}State>(
-        builder: (context, state) {
+        builder: (BuildContext context, ${FEATURE_PASCAL}State state) {
           return state.when(
             initial: () => const Center(child: Text('Initial')),
             loading: () => const Center(child: CircularProgressIndicator()),
-            loaded: (data) => Center(child: Text('Data: \${data.name}')),
-            error: (message) => Center(child: Text('Error: \$message')),
+            loaded: (${FEATURE_PASCAL} data) => Center(child: Text('Data: \${data.name}')),
+            error: (String message) => Center(child: Text('Error: \$message')),
           );
         },
       ),
@@ -303,12 +307,12 @@ void main() {
       'emits [loading, loaded] when loadData is successful',
       build: () {
         when(() => mockService.getData()).thenAnswer(
-          (_) async => const Right(${FEATURE_PASCAL}(id: '1', name: 'Test')),
+          (_) async => const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '1', name: 'Test')),
         );
         return cubit;
       },
-      act: (cubit) => cubit.loadData(),
-      expect: () => [
+      act: (${FEATURE_PASCAL}Cubit cubit) => cubit.loadData(),
+      expect: () => <${FEATURE_PASCAL}State>[
         const ${FEATURE_PASCAL}State.loading(),
         const ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL}(id: '1', name: 'Test')),
       ],
@@ -318,12 +322,12 @@ void main() {
       'emits [loading, error] when loadData fails',
       build: () {
         when(() => mockService.getData()).thenAnswer(
-          (_) async => const Left(Failure.serverError(message: 'Error')),
+          (_) async => const Left<Failure, ${FEATURE_PASCAL}>(Failure.serverError(message: 'Error')),
         );
         return cubit;
       },
-      act: (cubit) => cubit.loadData(),
-      expect: () => [
+      act: (${FEATURE_PASCAL}Cubit cubit) => cubit.loadData(),
+      expect: () => <${FEATURE_PASCAL}State>[
         const ${FEATURE_PASCAL}State.loading(),
         const ${FEATURE_PASCAL}State.error('Error'),
       ],
@@ -356,10 +360,10 @@ void main() {
 
     test('getData calls repository.getData', () async {
       when(() => mockRepository.getData()).thenAnswer(
-        (_) async => const Right(${FEATURE_PASCAL}(id: '1', name: 'Test')),
+        (_) async => const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '1', name: 'Test')),
       );
 
-      final result = await service.getData();
+      final Either<Failure, ${FEATURE_PASCAL}> result = await service.getData();
 
       expect(result.isRight(), true);
       verify(() => mockRepository.getData()).called(1);
@@ -368,20 +372,19 @@ void main() {
 }
 EOF
 
-echo -e "${GREEN}✓ Feature $FEATURE_SNAKE generated successfully!${NC}"
+echo -e "${GREEN}✓ Feature $FEATURE_SNAKE files generated!${NC}"
+
+# 13. Auto-run Build Runner
+echo -e "${BLUE}🔧 Running build_runner to generate Freezed code...${NC}"
+if command -v dart &> /dev/null; then
+  dart run build_runner build --delete-conflicting-outputs
+  echo -e "${GREEN}✓ Code generation complete. No more analyze errors!${NC}"
+else
+  echo -e "${RED}⚠️  Warning: 'dart' command not found. Run build_runner manually.${NC}"
+fi
+
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
-echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}:"
-echo -e "   ${BLUE}Data Sources:${NC}"
-echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}RemoteDataSource>(() => ${FEATURE_PASCAL}RemoteDataSource());"
-echo -e "   ${BLUE}Repositories:${NC}"
-echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}Repository>(() => ${FEATURE_PASCAL}Repository(getIt<I${FEATURE_PASCAL}RemoteDataSource>()));"
-echo -e "   ${BLUE}Services:${NC}"
-echo -e "   getIt.registerLazySingleton<${FEATURE_PASCAL}Service>(() => ${FEATURE_PASCAL}Service(getIt<I${FEATURE_PASCAL}Repository>()));"
-echo -e "   ${BLUE}Cubits:${NC}"
-echo -e "   getIt.registerFactory<${FEATURE_PASCAL}Cubit>(() => ${FEATURE_PASCAL}Cubit(getIt<${FEATURE_PASCAL}Service>()));"
-echo ""
+echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}"
 echo -e "2. Add a route in ${GREEN}lib/core/router/app_router.dart${NC}"
-echo -e "3. Run code generation:"
-echo -e "   ${GREEN}dart run build_runner build --delete-conflicting-outputs${NC}"
 echo ""

@@ -240,6 +240,66 @@ getIt.registerFactory<AuthCubit>(() => AuthCubit(getIt<IAuthRepository>()));
 
 ---
 
+## Service → UI Communication (streams, not cubit refs)
+
+When a domain service needs to trigger UI state changes, the dependency arrow must point
+**inward only** — the cubit knows about the service, never the reverse.
+
+The pattern: the service exposes a **broadcast stream**, the cubit subscribes to it.
+
+```dart
+// ✅ CORRECT — service owns the stream, knows nothing about cubits
+class AvatarAnimationService {
+  final _controller = StreamController<AvatarAnimation>.broadcast();
+
+  Stream<AvatarAnimation> get animations => _controller.stream;
+
+  void triggerAnimation(AvatarAnimation animation) {
+    _controller.add(animation);
+  }
+
+  void dispose() => _controller.close();
+}
+
+// Cubit subscribes — dependency flows inward
+class AvatarCubit extends Cubit<AvatarState> {
+  final AvatarAnimationService _animationService;
+  late final StreamSubscription _sub;
+
+  AvatarCubit(this._animationService) : super(const AvatarState.initial()) {
+    _sub = _animationService.animations.listen(_onAnimation);
+  }
+
+  void _onAnimation(AvatarAnimation animation) {
+    emit(state.copyWith(currentAnimation: animation));
+  }
+
+  @override
+  Future<void> close() {
+    _sub.cancel();
+    return super.close();
+  }
+}
+```
+
+```dart
+// ❌ WRONG — service holds a cubit reference, dependency arrow reversed
+class AvatarAnimationService {
+  final AvatarCubit _cubit; // service depending on presentation layer
+  void triggerAnimation(AvatarAnimation a) => _cubit.playAnimation(a);
+}
+
+// ❌ ALSO WRONG — interface trick doesn't fix the direction
+class AvatarAnimationService {
+  final AvatarAnimationController _controller; // still a cubit at runtime
+}
+```
+
+> **Rule:** If registering a service requires passing `getIt<SomeCubit>()` as an argument,
+> the dependency arrow is pointing the wrong way. Flip it with a stream.
+
+---
+
 ## Anti-Patterns (Never Do)
 
 | ❌ Wrong | ✅ Fix |
@@ -254,6 +314,7 @@ getIt.registerFactory<AuthCubit>(() => AuthCubit(getIt<IAuthRepository>()));
 | Cubit depending on another cubit | Extract shared logic to domain service |
 | `context.read` after `await` | Capture reference before the `await` |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
+| Service holding a cubit ref (even via interface) | Expose a stream; cubit subscribes |
 
 ---
 
