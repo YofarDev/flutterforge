@@ -5,6 +5,7 @@ A production-ready Flutter template with CLI tools and AI agent skills for robus
 ## What is FlutterForge?
 
 FlutterForge is a template + toolkit that helps you:
+
 - **Start new Flutter projects** with a solid, feature-based architecture. The goal is to provide a template that you can use as a starting point for your next Flutter project, with solid foundations for working with agents.
 - **Speed up daily development** with utility scripts.
 - **Get AI assistance** with Claude-powered development skills.
@@ -19,8 +20,9 @@ git clone <this-repo> flutterforge
 cd flutterforge
 
 # 2. Create your new project
-# This will create a new directory 'my_app' inside flutterforge
-./create_flutter_project.sh --org=com.yourcompany my_app
+# This will create a new directory 'my_app' inside flutterforge.
+# You can pass any standard 'flutter create' arguments (e.g., --platforms, --description).
+dart create_project.dart --org=com.yourcompany --platforms=android,ios my_app
 
 # 3. Start developing
 cd my_app
@@ -28,6 +30,7 @@ flutter run
 ```
 
 Your new project is automatically configured with:
+
 - Feature-based architecture (BLoC/Cubit)
 - Dependency injection (get_it)
 - Routing (go_router)
@@ -43,31 +46,32 @@ Your new project is automatically configured with:
 
 ### Template Features
 
-| Feature | Implementation |
-|---------|----------------|
-| Architecture | Feature-based with data/domain/presentation layers |
-| State Management | Cubit (flutter_bloc) |
-| DI | get_it |
-| Routing | go_router |
-| Models | freezed + json_serializable |
-| Testing | mocktail + bloc_test |
-| Localization | flutter_localizations + intl |
-| Theming | Material 3, light/dark |
+| Feature          | Implementation                                     |
+| ---------------- | -------------------------------------------------- |
+| Architecture     | Feature-based with data/domain/presentation layers |
+| State Management | Cubit (flutter_bloc)                               |
+| DI               | get_it                                             |
+| Routing          | go_router                                          |
+| Models           | freezed + json_serializable                        |
+| Testing          | mocktail + bloc_test                               |
+| Localization     | flutter_localizations + intl                       |
+| Theming          | Material 3, light/dark                             |
 
 ### CLI Scripts
 
 These scripts are automatically copied to your project's `./scripts` folder:
 
-| Script | Purpose |
-|--------|---------|
-| `./scripts/fanal.sh` | Generate code audit report for LLM review |
-| `./scripts/fbuild.sh` | Build AAB + IPA, auto-increment version |
-| `./scripts/fstr.sh "key" "French" "English"` | Add localization string |
-| `./scripts/fdead.sh` | Find orphaned (unused) files |
-| `./scripts/fdead.sh --clean-dead` | Delete orphaned files |
-| `./scripts/fimp.sh` | Auto-fix broken imports |
-| `./scripts/fcheck.sh "pattern"` | Search code in lib/ |
-| `./scripts/findstr.sh "pattern"` | Search code in lib/ + test/ |
+| Script                                         | Purpose                                               |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| `./scripts/fgen.sh "feature_name"`           | Generate new feature boilerplate (Clean Architecture) |
+| `./scripts/fanal.sh`                         | Generate code audit report for LLM review             |
+| `./scripts/fbuild.sh`                        | Build AAB + IPA, auto-increment version               |
+| `./scripts/fstr.sh "key" "French" "English"` | Add localization string                               |
+| `./scripts/fdead.sh`                         | Find orphaned (unused) files                          |
+| `./scripts/fdead.sh --clean-dead`            | Delete orphaned files                                 |
+| `./scripts/fimp.sh`                          | Auto-fix broken imports                               |
+| `./scripts/fcheck.sh "pattern"`              | Search code in lib/                                   |
+| `./scripts/findstr.sh "pattern"`             | Search code in lib/ + test/                           |
 
 ### Claude Skills
 
@@ -75,8 +79,9 @@ The `.claude/` folder contains skills that help AI assistants work with your Flu
 
 - **flutter-architecture** - Enforces clean architecture, proper DI, file size limits.
 - **flutter-testing** - Unit/widget test patterns with mocktail.
-- **flutter-bloc-provider** - Fixes provider errors, dialog/sheet patterns.
 - **flutter-audit** - Analyzes codebase for architecture violations.
+- **flutter-bloc-provider** - Fixes provider errors, dialog/sheet patterns.
+- **prepare-context** - Exports project files as `.txt` into a flat folder (`context-export/`) for external AI tools.
 
 These skills are automatically loaded when using Claude Code.
 
@@ -114,9 +119,27 @@ lib/
 ```
 
 Each feature follows clean architecture with clear separation:
+
 - **data/**: Repository implementations (concrete data sources).
 - **domain/**: Business logic - interfaces, models, services.
 - **presentation/**: UI layer - blocs, screens, widgets.
+
+### Adding a New Feature
+
+You can quickly generate all the boilerplate for a new feature following the project's clean architecture:
+
+```bash
+./scripts/fgen.sh my_new_feature
+```
+
+This will create:
+
+- **Domain Layer**: Model, Repository interface, and Service.
+- **Data Layer**: DTO and Repository implementation.
+- **Presentation Layer**: Cubit, State, and Screen.
+- **Tests**: Basic Cubit and Service tests.
+
+After running the script, follow the printed instructions to register your new classes in `lib/core/di/service_locator.dart`.
 
 ---
 
@@ -129,6 +152,7 @@ After creating a new project, you can delete the demo features to start fresh wi
 ```
 
 This will automatically:
+
 - Delete `lib/features/counter` and `test/features/counter`.
 - Remove DI registrations from `service_locator.dart`.
 - Remove routes from `app_router.dart`.
@@ -153,6 +177,7 @@ dart format .                    # Format code
 ## Testing
 
 Comprehensive testing documentation can be found in the [test/README.md](test/README.md) file. It covers:
+
 - Unit, Widget, and Integration tests.
 - Best practices for mocking with `mocktail`.
 - Naming conventions and checklist.
@@ -163,7 +188,7 @@ Comprehensive testing documentation can be found in the [test/README.md](test/RE
 
 ### Adding Packages
 
-Edit `packages_to_add.json` in the template root before running `create_flutter_project.sh`:
+Edit `packages_to_add.json` in the template root before running `create_project.dart`:
 
 ```json
 {
@@ -175,7 +200,7 @@ Edit `packages_to_add.json` in the template root before running `create_flutter_
 ### Changing Default Org
 
 ```bash
-./create_flutter_project.sh --org=com.mycompany my_app
+dart create_project.dart --org=com.mycompany my_app
 ```
 
 Default org is `fr.yofardev`.
