@@ -2,24 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/l10n/generated/app_localizations.dart';
+import '../../../../core/l10n/generated/app_localizations.dart';
 import '../bloc/counter_cubit.dart';
+import '../bloc/counter_state.dart';
 
-/// DEMO FEATURE - Delete counter folder when building your app.
-/// Demonstrates: BlocProvider, BlocBuilder, BlocListener pattern.
 class CounterScreen extends StatelessWidget {
   const CounterScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider<CounterCubit>(
-      create: (BuildContext context) => CounterCubit(),
-      child: const CounterView(),
-    );
+    return const CounterView();
   }
 }
 
-/// Counter view - separated from page for testing.
 class CounterView extends StatelessWidget {
   const CounterView({super.key});
 
@@ -32,7 +27,7 @@ class CounterView extends StatelessWidget {
         title: Text(l10n.counterTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(), // Now pop() will work with push()
+          onPressed: () => context.pop(),
           tooltip: 'Back to Home',
         ),
       ),
@@ -92,17 +87,4 @@ class CounterView extends StatelessWidget {
       ),
     );
   }
-
-  // BlocListener example for side effects (navigation, dialogs, snackbars).
-  // IMPORTANT: Never do these in build() or BlocBuilder!
-  //
-  // Wrap with BlocListener:
-  // BlocListener<CounterCubit, CounterState>(
-  //   listener: (context, state) {
-  //     if (state.count % 10 == 0) {
-  //       ScaffoldMessenger.showSnackBar(...);
-  //     }
-  //   },
-  //   child: YourWidget(),
-  // )
 }

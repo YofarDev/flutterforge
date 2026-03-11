@@ -2,29 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/l10n/generated/app_localizations.dart';
+import '../../../../core/l10n/generated/app_localizations.dart';
+import '../../../../core/router/route_constants.dart';
 import '../bloc/home_cubit.dart';
+import '../bloc/home_state.dart';
 
-/// The home screen of the application.
-///
-/// This screen serves as the main entry point and can be customized
-/// to display whatever content is appropriate for your app.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider<HomeCubit>(
-      create: (BuildContext context) => HomeCubit()..initialize(),
-      child: const HomeView(),
-    );
+    return const HomeView();
   }
 }
 
-/// The actual view/widget for the home screen.
-///
-/// Separating the view from the page allows for better testing
-/// and reusability.
 class HomeView extends StatelessWidget {
   const HomeView({super.key});
 
@@ -55,9 +46,8 @@ class HomeView extends StatelessWidget {
                   const SizedBox(height: 16),
                   const Text('Home Screen'),
                   const SizedBox(height: 32),
-                  // Demo navigation button
                   FilledButton.icon(
-                    onPressed: () => context.push('/counter'), // Use push() for proper navigation stack
+                    onPressed: () => context.push(Routes.counter),
                     icon: const Icon(Icons.arrow_forward),
                     label: const Text('Try the Counter Demo'),
                   ),

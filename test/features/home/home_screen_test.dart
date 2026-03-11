@@ -1,24 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:my_flutter_app/core/di/service_locator.dart';
 import 'package:my_flutter_app/core/l10n/generated/app_localizations.dart';
-import 'package:my_flutter_app/features/home/bloc/home_cubit.dart';
-import 'package:my_flutter_app/features/home/screens/home_screen.dart';
+import 'package:my_flutter_app/features/home/domain/models/home_data.dart';
+import 'package:my_flutter_app/features/home/domain/services/home_service.dart';
+import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
+import 'package:my_flutter_app/features/home/presentation/bloc/home_state.dart';
+import 'package:my_flutter_app/features/home/presentation/screens/home_screen.dart';
+
+class MockHomeService extends Mock implements HomeService {}
+
+class MockHomeCubit extends Mock implements HomeCubit {}
 
 /// Widget tests for the HomeScreen and HomeView.
-///
-/// These tests verify that:
-/// - UI elements are rendered correctly
-/// - Loading state is shown during initialization
-/// - Welcome message is displayed after loading
 void main() {
+  setUpAll(() {
+    registerFallbackValue(const HomeState());
+    registerFallbackValue(
+      HomeData(welcomeMessage: '', lastUpdated: DateTime(2024)),
+    );
+  });
+
   group('HomeScreen', () {
+    late MockHomeCubit mockHomeCubit;
+
+    setUp(() {
+      mockHomeCubit = MockHomeCubit();
+      getIt.reset();
+      getIt.registerFactory<HomeCubit>(() => mockHomeCubit);
+
+      when(() => mockHomeCubit.initialize()).thenAnswer((_) async {});
+      when(() => mockHomeCubit.state).thenReturn(const HomeState());
+      when(
+        () => mockHomeCubit.stream,
+      ).thenAnswer((_) => const Stream<HomeState>.empty());
+      when(() => mockHomeCubit.close()).thenAnswer((_) async {});
+    });
+
     testWidgets('renders HomeView', (WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: const HomeScreen(),
+          home: BlocProvider<HomeCubit>.value(
+            value: mockHomeCubit,
+            child: const HomeScreen(),
+          ),
         ),
       );
       await tester.pumpAndSettle(const Duration(milliseconds: 600));
@@ -31,7 +60,10 @@ void main() {
         MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
-          home: const HomeScreen(),
+          home: BlocProvider<HomeCubit>.value(
+            value: mockHomeCubit,
+            child: const HomeScreen(),
+          ),
         ),
       );
       await tester.pumpAndSettle(const Duration(milliseconds: 600));
@@ -43,9 +75,14 @@ void main() {
 
   group('HomeView', () {
     late HomeCubit homeCubit;
+    late MockHomeService mockHomeService;
 
     setUp(() {
-      homeCubit = HomeCubit();
+      mockHomeService = MockHomeService();
+      homeCubit = HomeCubit(mockHomeService);
+
+      getIt.reset();
+      getIt.registerFactory<HomeCubit>(() => homeCubit);
     });
 
     tearDown(() {

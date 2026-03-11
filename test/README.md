@@ -12,11 +12,27 @@ test/
 │   ├── counter/
 │   │   ├── bloc/
 │   │   │   └── counter_cubit_test.dart
-│   │   └── counter_screen_test.dart
+│   │   ├── data/
+│   │   │   └── repositories/
+│   │   │       └── counter_repository_test.dart
+│   │   ├── domain/
+│   │   │   └── services/
+│   │   │       └── counter_service_test.dart
+│   │   └── presentation/
+│   │       └── screens/
+│   │           └── counter_screen_test.dart
 │   └── home/
 │       ├── bloc/
 │       │   └── home_cubit_test.dart
-│       └── home_page_test.dart
+│       ├── data/
+│       │   └── repositories/
+│       │       └── home_repository_test.dart
+│       ├── domain/
+│       │   └── services/
+│       │       └── home_service_test.dart
+│       └── presentation/
+│           └── screens/
+│               └── home_screen_test.dart
 ├── core/                 # Core module tests
 │   └── theme/
 │       └── app_theme_test.dart
@@ -93,7 +109,63 @@ testWidgets('increments count when + button is tapped', (tester) async {
 - Use `pumpAndSettle()` for async operations
 - Close cubits in `tearDown()`
 
-### 3. Integration Tests
+### 3. Repository Tests
+
+Located in: `test/features/<feature>/data/repositories/`
+
+These test data layer: API calls, DTO mapping, error wrapping.
+
+**What to test:**
+- `Right(value)` on success
+- `Left(Failure)` on errors
+- DTO → domain mapping
+- Exceptions wrapped in Failure
+
+**Example:**
+```dart
+test('returns Right(User) on success', () async {
+  when(() => mockApi.login(
+    email: any(named: 'email'),
+    password: any(named: 'password'),
+  )).thenAnswer((_) async => fakeUserDto);
+
+  final result = await repo.login('user@ex.com', 'pass');
+
+  expect(result.isRight(), true);
+});
+```
+
+**Best Practices:**
+- Use `registerFallbackValue()` in `setUpAll()` for any() matchers
+- Verify mock calls with `verify(() => ...).called(1)`
+- Test error paths — exceptions should become `Left(Failure)`
+
+### 4. Domain Service Tests
+
+Located in: `test/features/<feature>/domain/services/`
+
+These test coordination logic extracted from cubits — pure isolation, no cubits.
+
+**What to test:**
+- Service methods return correct values
+- Edge cases (boundary values, empty input)
+- Delegation to repository verified
+
+**Example:**
+```dart
+test('clamps value above maximum', () {
+  const settings = CounterSettings(minValue: 0, maxValue: 100);
+
+  expect(service.clampValue(105, settings), 100);
+});
+```
+
+**Best Practices:**
+- No `blocTest` needed — regular `test()`
+- No cubit imports in service tests
+- Test every code path in the service
+
+### 5. Integration Tests
 
 Located in: `test/app_test.dart`
 
@@ -117,6 +189,29 @@ testWidgets('app starts and shows home screen', (tester) async {
 **Best Practices:**
 - Wait for async initialization (e.g., `pumpAndSettle(Duration(milliseconds: 600))`)
 - Test critical user paths
+
+### Integration Tests with Service Locator
+
+When testing the full app that uses GetIt service locator, you need to properly setup mocks:
+
+```dart
+setUp(() async {
+  mockCubit = MockCubit();
+  
+  // Reset and setup service locator
+  getIt.reset();
+  await setupServiceLocator();
+  
+  // Unregister real implementations and register mocks
+  getIt.unregister<MyCubit>();
+  getIt.registerFactory<MyCubit>(() => mockCubit);
+});
+```
+
+**Important:**
+- Always call `getIt.reset()` before `setupServiceLocator()` to clear previous registrations
+- Use `getIt.unregister<T>()` after setup to replace real implementations with mocks
+- Call `setupServiceLocator()` in `setUp()` (not `setUpAll()`) to avoid "Type already registered" errors
 
 ## Running Tests
 

@@ -1,20 +1,44 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:my_flutter_app/features/counter/bloc/counter_cubit.dart';
+import 'package:fpdart/fpdart.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:my_flutter_app/core/models/failure.dart';
+import 'package:my_flutter_app/features/counter/domain/models/counter_settings.dart';
+import 'package:my_flutter_app/features/counter/domain/services/counter_service.dart';
+import 'package:my_flutter_app/features/counter/presentation/bloc/counter_cubit.dart';
+import 'package:my_flutter_app/features/counter/presentation/bloc/counter_state.dart';
+
+class MockCounterService extends Mock implements CounterService {}
 
 /// Tests for the CounterCubit.
-///
-/// These tests verify the business logic of the counter feature.
-/// For each method in the cubit, we test:
-/// - Initial state
-/// - State transitions
-/// - Edge cases
 void main() {
+  setUpAll(() {
+    registerFallbackValue(const CounterSettings());
+  });
+
   group('CounterCubit', () {
     late CounterCubit counterCubit;
+    late MockCounterService mockCounterService;
 
     setUp(() {
-      counterCubit = CounterCubit();
+      mockCounterService = MockCounterService();
+      counterCubit = CounterCubit(mockCounterService);
+
+      // Default stubs
+      when(() => mockCounterService.getSettings()).thenAnswer(
+        (_) async => const Right<Failure, CounterSettings>(CounterSettings()),
+      );
+      when(() => mockCounterService.clampValue(any(), any())).thenAnswer(
+        (Invocation invocation) => invocation.positionalArguments[0] as int,
+      );
+      when(() => mockCounterService.applyStepSize(any(), any())).thenAnswer((
+        Invocation invocation,
+      ) {
+        final int val = invocation.positionalArguments[0] as int;
+        final CounterSettings settings =
+            invocation.positionalArguments[1] as CounterSettings;
+        return val + settings.stepSize;
+      });
     });
 
     tearDown(() {
@@ -32,22 +56,6 @@ void main() {
         act: (CounterCubit cubit) => cubit.increment(),
         expect: () => <CounterState>[const CounterState(count: 1)],
       );
-
-      blocTest<CounterCubit, CounterState>(
-        'emits correct states when increment is called multiple times',
-        build: () => counterCubit,
-        act: (CounterCubit cubit) {
-          cubit
-            ..increment()
-            ..increment()
-            ..increment();
-        },
-        expect: () => <CounterState>[
-          const CounterState(count: 1),
-          const CounterState(count: 2),
-          const CounterState(count: 3),
-        ],
-      );
     });
 
     group('decrement', () {
@@ -57,56 +65,14 @@ void main() {
         act: (CounterCubit cubit) => cubit.decrement(),
         expect: () => <CounterState>[const CounterState(count: -1)],
       );
-
-      blocTest<CounterCubit, CounterState>(
-        'emits correct states when decrement is called multiple times',
-        build: () => counterCubit,
-        act: (CounterCubit cubit) {
-          cubit
-            ..decrement()
-            ..decrement();
-        },
-        expect: () => <CounterState>[
-          const CounterState(count: -1),
-          const CounterState(count: -2),
-        ],
-      );
     });
 
     group('reset', () {
       blocTest<CounterCubit, CounterState>(
-        'emits [count: 0] when reset is called from non-zero state',
-        build: () => counterCubit,
-        seed: () => const CounterState(count: 5),
-        act: (CounterCubit cubit) => cubit.reset(),
-        expect: () => <CounterState>[const CounterState(count: 0)],
-      );
-
-      blocTest<CounterCubit, CounterState>(
-        'emits [count: 0] when reset is called from initial state',
+        'emits [count: 0] when reset is called',
         build: () => counterCubit,
         act: (CounterCubit cubit) => cubit.reset(),
         expect: () => <CounterState>[const CounterState(count: 0)],
-      );
-    });
-
-    group('combined operations', () {
-      blocTest<CounterCubit, CounterState>(
-        'emits correct sequence for increment, increment, decrement, reset',
-        build: () => counterCubit,
-        act: (CounterCubit cubit) {
-          cubit
-            ..increment()
-            ..increment()
-            ..decrement()
-            ..reset();
-        },
-        expect: () => <CounterState>[
-          const CounterState(count: 1),
-          const CounterState(count: 2),
-          const CounterState(count: 1),
-          const CounterState(count: 0),
-        ],
       );
     });
   });

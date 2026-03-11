@@ -50,20 +50,12 @@ echo "📂 Copying 'lib' folder from template..."
 rm -rf lib
 cp -r "$SCRIPT_DIR/lib" .
 
-# 3. Copy test folder template
+# 4. Copy test folder template
 echo "🧪 Copying 'test' folder from template..."
 rm -rf test
 cp -r "$SCRIPT_DIR/test" .
 
-# 4. Update import paths in test files
-echo "🔧 Updating import paths in test files..."
-# Replace the placeholder package name with the actual project name
-find test -name "*.dart" -type f -exec sed -i.bak "s/package:my_flutter_app/package:$PROJECT_NAME/g" {} \;
-# Remove backup files
-find test -name "*.bak" -type f -delete
-echo "   ✓ Import paths updated"
-
-# 5. Copy .claude folder (contains skills and configuration)
+# 6. Copy .claude folder (contains skills and configuration)
 echo "🤖 Copying '.claude' folder..."
 if [ -d "$SCRIPT_DIR/.claude" ]; then
     cp -r "$SCRIPT_DIR/.claude" .
@@ -72,11 +64,11 @@ else
     echo "⚠️  Warning: .claude folder not found in template. Skipping."
 fi
 
-# 6. Copy analysis_options.yaml
+# 7. Copy analysis_options.yaml
 echo "⚙️  Copying 'analysis_options.yaml'..."
 cp "$SCRIPT_DIR/analysis_options.yaml" .
 
-# 7. Copy l10n.yaml configuration
+# 8. Copy l10n.yaml configuration
 echo "🌐 Copying 'l10n.yaml'..."
 if [ -f "$SCRIPT_DIR/l10n.yaml" ]; then
     cp "$SCRIPT_DIR/l10n.yaml" .
@@ -85,7 +77,7 @@ else
     echo "⚠️  Warning: l10n.yaml not found in template. Skipping."
 fi
 
-# 8. Copy .gitignore template
+# 9. Copy .gitignore template
 echo "📋 Copying '.gitignore'..."
 if [ -f "$SCRIPT_DIR/template-gitignore" ]; then
     # Flutter create generates a .gitignore, so we append to it
@@ -95,7 +87,7 @@ else
     echo "⚠️  Warning: template-gitignore not found in template. Skipping."
 fi
 
-# 9. Copy Inter font files
+# 10. Copy Inter font files
 echo "🔤 Setting up Inter font..."
 FONT_SOURCE="$SCRIPT_DIR/fonts"
 if [ -d "$FONT_SOURCE" ]; then
@@ -106,12 +98,13 @@ else
     echo "⚠️  Warning: Font folder '$FONT_SOURCE' not found. Skipping fonts."
 fi
 
-# 10. Remove comments from pubspec.yaml
+
+# 12. Remove comments from pubspec.yaml
 # This removes lines starting with # (ignoring leading whitespace)
 echo "🧹 Removing comments from pubspec.yaml..."
 sed -E '/^[[:space:]]*#/d' pubspec.yaml > pubspec.tmp && mv pubspec.tmp pubspec.yaml
 
-# 11. Add assets and font configuration to pubspec.yaml
+# 13. Add assets and font configuration to pubspec.yaml
 echo "📝 Adding assets and font configuration to pubspec.yaml..."
 
 # Check if flutter section exists and add assets/fonts configuration
@@ -150,12 +143,12 @@ else
     echo "   ⚠️  Flutter section not found in pubspec.yaml"
 fi
 
-# 12. Add localization packages
+# 14. Add localization packages
 echo "🌐 Adding localization packages..."
 flutter pub add flutter_localizations --sdk=flutter
 flutter pub add intl:any
 
-# 13. Add packages from packages_to_add.json
+# 15. Add packages from packages_to_add.json
 PACKAGES_FILE="$SCRIPT_DIR/packages_to_add.json"
 if [ -f "$PACKAGES_FILE" ]; then
     echo "📦 Adding packages from packages_to_add.json..."
@@ -181,7 +174,7 @@ else
     echo "⚠️  Warning: '$PACKAGES_FILE' not found. Skipping packages."
 fi
 
-# 14. Enable generation in pubspec.yaml
+# 16. Enable generation in pubspec.yaml
 echo "⚙️  Enabling generation in pubspec.yaml..."
 if grep -q "^flutter:" pubspec.yaml; then
     if ! grep -q "^[[:space:]]*generate:" pubspec.yaml; then
@@ -193,18 +186,12 @@ if grep -q "^flutter:" pubspec.yaml; then
     fi
 fi
 
-# 15. Generate localization files
+# 17. Generate localization files
 echo "🌐 Generating localization files..."
 flutter gen-l10n
 echo "   ✓ Localization files generated"
 
-# 16. Run build_runner (for freezed code generation)
-echo "🔧 Running build_runner for code generation..."
-echo "   (This may take a minute...)"
-dart run build_runner build --delete-conflicting-outputs
-echo "   ✓ Code generation complete"
-
-# 17. Copy README.md
+# 18. Copy README.md
 echo "📄 Copying README.md..."
 if [ -f "$SCRIPT_DIR/README.md" ]; then
     cp "$SCRIPT_DIR/README.md" .
@@ -213,8 +200,20 @@ else
     echo "⚠️  Warning: README.md not found in template. Skipping."
 fi
 
+# 19. Replace placeholder package name with actual project name
+echo "✏️  Replacing placeholder package name 'my_flutter_app' with '$PROJECT_NAME'..."
+# Use a temporary file for sed to be more portable, or just use find -exec
+find . -type f \( -name "*.dart" -o -name "*.md" -o -name "*.yaml" -o -name "*.arb" \) -exec sed -i "s/my_flutter_app/$PROJECT_NAME/g" {} +
+echo "   ✓ Package name replaced in all files"
+
+# 20. Run build_runner (for freezed code generation)
+echo "🔧 Running build_runner for code generation..."
+echo "   (This may take a minute...)"
+dart run build_runner build --delete-conflicting-outputs
+echo "   ✓ Code generation complete"
+
 echo "✅ Project setup complete!"
 
-# 18. Open in VS Code
+# 21. Open in VS Code
 echo "📝 Opening project in VS Code..."
 code .

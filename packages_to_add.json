@@ -6,7 +6,8 @@
         "nested",
         "go_router",
         "freezed_annotation",
-        "get_it"
+        "get_it",
+        "fpdart"
     ],
     "dev_dependencies":
     [
