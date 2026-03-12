@@ -1,15 +1,25 @@
 ---
 name: prepare-context
 description: >
-  Export the minimal set of relevant project files as .txt files into a flat folder
-  so they can be uploaded to external AI tools. Use when the user wants to prepare
-  project context for ChatGPT, Claude, Gemini, or similar tools.
----
-```
-
+  ONLY activate this skill when the user explicitly types the command "/prepare-context".
+  Do NOT trigger this skill based on any other phrasing, keywords, or inferred intent —
+  even if the user mentions exporting files, uploading context, or preparing for ChatGPT,
+  Claude, Gemini, or similar tools. Wait for the exact command.
 # Context Export Skill
 
 Export only the files needed to answer the user's specific external question.
+
+## 0. Verify project root
+
+Before doing anything, confirm the user is in their project root:
+
+```bash
+pwd && ls
+```
+
+If the directory doesn't look like a project root (no `package.json`, `pyproject.toml`, `README`, etc.), ask the user to `cd` into their project first.
+
+---
 
 ## 1. Clarify the goal
 
@@ -40,7 +50,7 @@ Include only what is directly needed.
 
 Rule of thumb:
 
-> If removing a file would not hurt the external tool’s ability to answer the question, don’t include it.
+> If removing a file would not hurt the external tool's ability to answer the question, don't include it.
 
 Keep it lean.
 
@@ -74,6 +84,18 @@ for f in "${files[@]}"; do
   cp "$f" "$dest"
 done
 ```
+
+---
+
+## 5. Confirm and summarize
+
+After exporting, tell the user:
+- How many files were exported
+- Their names (the `.txt` filenames in `context-export/`)
+- The folder path to upload from
+
+Example:
+> "Exported 3 files to `./context-export/`: `README.md.txt`, `package.json.txt`, `src__auth__login.ts.txt`. Upload that folder to your external tool."
 
 ---
 
