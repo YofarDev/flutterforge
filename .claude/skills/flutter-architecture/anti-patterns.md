@@ -10,7 +10,8 @@
 | Features importing each other | Route through `core/` only |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
 | Services instantiated in widgets | Inject via `get_it` |
-| Giant screen files (>300 lines) | Extract to `widgets/` subdirectory |
+| Giant screen file where different sections have unrelated reasons to change | Extract to `widgets/` subdirectory |
+| Splitting a file just to reduce line count | Only extract when the piece has a clear, standalone purpose — if the two new files need to call each other, the split made things worse |
 | Raw `GoRouter.of(context).go()` in build | Navigate in `BlocListener` |
 
 ## Common Mistakes

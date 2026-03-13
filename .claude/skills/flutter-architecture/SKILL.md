@@ -13,7 +13,7 @@ license: MIT
 | Features | Layered: `data/ → domain/ → presentation/` |
 | State | **Cubit default**; BLoC only for debounce/throttle |
 | Listeners | **Always `MultiBlocListener`** — never nest |
-| Files | Widgets: 300, Services: 400, BLoCs: 300 lines |
+| Files | Split when a file has **more than one reason to change**, not by line count |
 | Models | `freezed` — immutable, sealed, exhaustive |
 | Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz) |
 | DI | `get_it` — **all wiring in `service_locator.dart` only** |
@@ -309,12 +309,43 @@ class AvatarAnimationService {
 | Services instantiated in widgets | Inject via `get_it` |
 | Cross-feature imports | Route through `core/` only |
 | Helper methods in widgets (`_buildX()`) | Extract to separate widget classes |
+| Splitting a file just to reduce line count | Only extract when the piece has a clear, standalone name and purpose — a 600-line cubit handling one coherent feature is better than three 150-line cubits that depend on each other |
 | `BlocBuilder` wrapping entire `Scaffold` | Wrap only the widget that needs state |
 | Manual cubit construction in `app.dart` | Always use `getIt<MyCubit>()` |
 | Cubit depending on another cubit | Extract shared logic to domain service |
 | `context.read` after `await` | Capture reference before the `await` |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
 | Service holding a cubit ref (even via interface) | Expose a stream; cubit subscribes |
+
+---
+
+## File Cohesion — When to Split
+
+Split a file when it has **more than one reason to change** — not when it crosses an arbitrary line count. A long file with a single, coherent purpose is fine. A short file that owns two unrelated concerns is not.
+
+Ask this before extracting: *"Does the piece I'm about to extract have a clear, standalone name and purpose?"* If you can't name it clearly, don't split it.
+
+```
+// ❌ WRONG — splitting to hit a line limit
+// chat_cubit.dart is 550 lines but handles one feature coherently
+// → mechanically split into chat_message_cubit.dart + chat_ui_cubit.dart
+// → now they need to call each other, creating hidden coupling
+
+// ✅ RIGHT — splitting along a real boundary
+// chat_cubit.dart: conversation state (messages, streaming, title)
+// chat_media_cubit.dart: media input (audio recording, image picking)
+// These have independent lifecycles and different reasons to change
+```
+
+Signs a file genuinely needs splitting:
+- You're scrolling past unrelated logic to find what you need
+- Different team members need to edit it for unrelated reasons
+- It imports from two different layers or domains
+
+Signs a file does **not** need splitting:
+- It's long but all lines serve the same state machine
+- The only motivation is the line count
+- Splitting would require the two new files to call each other
 
 ---
 

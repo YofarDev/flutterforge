@@ -205,7 +205,7 @@ Move shared code to: core/[module]/
 - [ ] Narrow `BlocBuilder` scopes (wrap only dependent widgets)
 - [ ] Replace nested `BlocListener`s with `MultiBlocListener`
 - [ ] Extract widget helper methods (`_buildX`) to separate widget classes
-- [ ] Enforce file size limits (300/400 lines)
+- [ ] Identify files with more than one reason to change and extract only where a clear, standalone name exists for the extracted piece
 
 ---
 
