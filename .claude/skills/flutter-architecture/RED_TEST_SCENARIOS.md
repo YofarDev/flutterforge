@@ -64,10 +64,10 @@ Document baseline behavior WITHOUT the skill to prove it addresses real problems
 ## Success Criteria (WITH skill)
 Agent should:
 1. Recommend layered architecture with clear boundaries
-2. Use Cubit by default, BLoC only for event transformers
-3. Enforce `freezed` for all states/models
+2. Use Cubit by default, and recommend BLoC when explicit events or concurrency policies improve clarity
+3. Prefer `freezed` for states/models, while accepting plain sealed immutable states when handled exhaustively
 4. Recommend `MultiBlocListener` for multiple listeners
 5. Never put navigation in build()
 6. Extract business logic from widgets to Cubits
-7. Keep files under 300/400 line limits
+7. Split files by cohesion and reasons to change, not arbitrary line-count limits
 8. Use dependency injection, never instantiate in widgets

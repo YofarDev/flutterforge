@@ -1,27 +1,27 @@
 ---
-name: flutter-bloc-provider
-description: Use only when diagnosing or fixing a 'Could not find Provider' runtime error, when writing dialog/bottom sheet code that needs a cubit, or when using Navigator.push (not go_router) with a cubit. For all other cubit/BLoC work, use flutter-architecture instead.
-license: MIT
+name: "flutter-bloc-provider"
+description: "Use only when diagnosing or fixing a 'Could not find Provider' runtime error, when writing dialog/bottom sheet code that needs a cubit, or when using Navigator.push (not go_router) with a cubit. For all other cubit/BLoC work, use flutter-architecture instead."
 ---
 
 # Flutter BLoC/Cubit Provider Skill
 
 ## Goal
 Generate code that **never** causes:
-```
+```text
 Error: Could not find the correct Provider<XCubit> above this Widget
 ```
 
 ## The Golden Rule
 
-**Always provide BlocProvider ABOVE the widget that uses it.**
+**Provide the cubit above the consuming subtree, and choose intentionally whether you want a new instance or the existing one.**
 
 | Cubit Scope | Where to Provide |
 |-------------|------------------|
-| App-wide (auth, theme) | `main.dart` → `MultiBlocProvider` |
-| Route-specific | Route builder in `router.dart` or `Navigator.push` |
-| Dialog | Inside `showDialog`/`showModalBottomSheet` builder |
-| Sub-widget | Parent's `build()` using `builder:` callback |
+| App-wide (auth, theme, locale) | App composition root such as `app.dart`, resolved from `getIt` |
+| Route-specific | `GoRoute` builder, feature entry widget, or `Navigator.push` wrapper |
+| Dialog / bottom sheet | Inside `showDialog` / `showModalBottomSheet` builder |
+| Reused existing cubit | `BlocProvider.value(...)` in the new subtree |
+| Sub-widget | Parent `build()` only when you truly need a local subtree scope |
 
 ## Root Causes & Fixes
 
@@ -33,36 +33,38 @@ class MyScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => MyCubit(),
+      create: (_) => getIt<MyCubit>(),
       child: Text(context.watch<MyCubit>().state.toString()), // Same context!
     );
   }
 }
 ```
 
-**✅ FIX 1: Use builder callback**
+**✅ FIX 1: Use a `Builder` for a local subtree**
 ```dart
 BlocProvider(
-  create: (_) => MyCubit(),
-  builder: (context, child) {  // New context
-    return Text(context.watch<MyCubit>().state.toString());
-  },
+  create: (_) => getIt<MyCubit>(),
+  child: Builder(
+    builder: (context) {
+      return Text(context.watch<MyCubit>().state.toString());
+    },
+  ),
 )
 ```
 
-**✅ FIX 2: Provide at route level (PREFERRED)**
+**✅ FIX 2: Provide at the route / feature boundary (preferred)**
 ```dart
-// In router.dart
 GoRoute(
   path: '/home',
-  builder: (context, state) => BlocProvider(
-    create: (_) => MyCubit(),
-    child: const HomeScreen(),  // Screen just consumes
+  builder: (_, __) => BlocProvider(
+    create: (_) => getIt<MyCubit>(),
+    child: const HomeScreen(),
   ),
 )
 
-// Screen consumes only
 class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return Text(context.watch<MyCubit>().state.toString());
@@ -70,11 +72,39 @@ class HomeScreen extends StatelessWidget {
 }
 ```
 
-### Cause 2: Cross-Route Access
+### Cause 2: New Subtree, Wrong Instance Strategy
 
-Providers are **scoped to subtree**. Route A's provider ≠ Route B's.
+Providers are scoped to a subtree. A pushed route, dialog, or bottom sheet is a **new boundary**.
 
-**Fix:** Re-provide in each route OR provide higher up (if shared).
+Choose one of these fixes:
+
+**✅ New instance for the new boundary**
+```dart
+Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => BlocProvider(
+      create: (_) => getIt<DetailCubit>(param1: itemId)..load(),
+      child: const DetailScreen(),
+    ),
+  ),
+)
+```
+
+**✅ Reuse the existing cubit instance**
+```dart
+Navigator.push(
+  context,
+  MaterialPageRoute(
+    builder: (_) => BlocProvider.value(
+      value: context.read<CartCubit>(),
+      child: const CartDetailsScreen(),
+    ),
+  ),
+)
+```
+
+Use `BlocProvider.value` only when the new subtree should share the **same existing instance**.
 
 ### Cause 3: Async Gap
 
@@ -82,82 +112,93 @@ Providers are **scoped to subtree**. Route A's provider ≠ Route B's.
 ```dart
 Future<void> _doSomething() async {
   await someAsyncOperation();
-  context.read<MyCubit>().doThing();  // May throw!
+  context.read<MyCubit>().doThing();
 }
 ```
 
 **✅ CORRECT:**
 ```dart
 Future<void> _doSomething() async {
-  final cubit = context.read<MyCubit>();  // Capture first
+  final cubit = context.read<MyCubit>();
   await someAsyncOperation();
-  cubit.doThing();  // Safe
+  cubit.doThing();
 }
 ```
 
 ## Code Generation Checklist
 
-- [ ] Provider **above** consuming widget in tree
-- [ ] Route cubits in router/navigator call, not in screen's `build()`
-- [ ] Global cubits in `main.dart`
-- [ ] `context.read()` captures **before** `await`
-- [ ] If providing in `build()`, use `builder:` callback
-- [ ] GoRouter routes provide in their `builder`
+- [ ] Provider is **above** the consuming subtree
+- [ ] Cubit lifetime is intentional: app-wide vs route-scoped vs local subtree
+- [ ] New cubit instances are resolved from `getIt`
+- [ ] Existing cubits reused across a new subtree use `BlocProvider.value`
+- [ ] `context.read()` is captured **before** `await`
+- [ ] `GoRoute`, `Navigator.push`, dialogs, and bottom sheets all create an explicit provider boundary
+- [ ] `main.dart` stays `runApp()` only; app-wide providers live in the app composition root
 
 ## Quick Patterns
 
-**App-wide (main.dart):**
+**App-wide (`app.dart`):**
 ```dart
-void main() {
-  runApp(
-    MultiBlocProvider(
-      providers: [
-        BlocProvider(create: (_) => AuthCubit()),
-        BlocProvider(create: (_) => ThemeCubit()),
-      ],
-      child: const MyApp(),
-    ),
-  );
-}
-```
-
-**Route-scoped (router.dart):**
-```dart
-GoRoute(
-  path: '/profile',
-  builder: (context, state) => BlocProvider(
-    create: (_) => ProfileCubit(),
-    child: const ProfileScreen(),
-  ),
+MultiBlocProvider(
+  providers: [
+    BlocProvider(create: (_) => getIt<AuthCubit>()),
+    BlocProvider(create: (_) => getIt<ThemeCubit>()),
+  ],
+  child: MaterialApp.router(...),
 )
 ```
 
-**Navigator.push:**
+**Route-scoped (`GoRoute`):**
+```dart
+GoRoute(
+  path: '/profile/:id',
+  builder: (_, state) {
+    final userId = state.pathParameters['id']!;
+    return BlocProvider(
+      create: (_) => getIt<ProfileCubit>(param1: userId)..load(),
+      child: const ProfileScreen(),
+    );
+  },
+)
+```
+
+**Navigator.push (new instance):**
 ```dart
 Navigator.push(
   context,
   MaterialPageRoute(
     builder: (_) => BlocProvider(
-      create: (_) => DetailCubit(),
+      create: (_) => getIt<DetailCubit>(param1: detailId),
       child: const DetailScreen(),
     ),
   ),
 )
 ```
 
-## context.read vs context.watch
+**Dialog / bottom sheet (reuse existing):**
+```dart
+showDialog(
+  context: context,
+  builder: (_) => BlocProvider.value(
+    value: context.read<AuthCubit>(),
+    child: const ConfirmLogoutDialog(),
+  ),
+)
+```
+
+## `context.read` vs `context.watch`
 
 | Method | Use In | Purpose |
 |--------|--------|---------|
 | `context.watch` | `build()` | Rebuilds on state change |
-| `context.read` | Callbacks | Calls methods, no rebuild |
+| `context.read` | Callbacks / async methods | Calls methods, no rebuild |
 
 ```dart
 @override
 Widget build(BuildContext context) {
-  final state = context.watch<MyCubit>().state;  // ✅ Rebuilds
+  final state = context.watch<MyCubit>().state;
   return ElevatedButton(
-    onPressed: () => context.read<MyCubit>().doSomething(),  // ✅ No rebuild
+    onPressed: () => context.read<MyCubit>().doSomething(),
     child: Text(state.toString()),
   );
 }
@@ -165,11 +206,12 @@ Widget build(BuildContext context) {
 
 ## Common Mistakes
 
-1. ❌ BlocProvider inside screen it provides (unless using `builder:`)
-2. ❌ Assume parent route's cubit in pushed route (re-provide it)
-3. ❌ `context.read` after `await` (capture first)
-4. ❌ Provide same cubit twice in same subtree
-5. ❌ `context.watch` outside `build()` (use `context.read`)
+1. ❌ Providing below the consumer in the same `build()` context
+2. ❌ Recreating a cubit when the new subtree should reuse the same instance
+3. ❌ Assuming a parent route's provider is automatically visible in a pushed route/dialog
+4. ❌ `context.read` after `await`
+5. ❌ Manual cubit construction instead of resolving from `getIt`
+6. ❌ Making feature cubits app-wide just to silence a provider error
 
 ## See Also
-- `examples.md` — Complete before/after examples, feature scaffolding template
+- See ../flutter-architecture/SKILL.md for broader structure, layering, and DI guidance

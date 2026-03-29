@@ -1,7 +1,6 @@
 ---
-name: flutter-testing
-description: Use when writing tests for Flutter projects, including unit tests, widget tests, bloc tests, or when the user asks how to test specific components (cubits, repositories, screens, domain services, agent tools). Triggers include: 'write tests for this', 'add unit tests', 'test my cubit', 'test my repository', 'write widget tests', 'improve test coverage', 'write a bloc_test', 'mock this dependency', 'add golden tests', 'how do I test X in Flutter', 'how should I test navigation', 'how do I test a freezed state', 'should I use mockito or mocktail', 'test my agent tool', 'test my domain service'. Always use alongside flutter-architecture when writing tests for existing features.
-license: MIT
+name: "flutter-testing"
+description: "Use when writing tests for Flutter projects, including unit tests, widget tests, bloc tests, or when the user asks how to test specific components (cubits, repositories, screens, domain services, agent tools). Triggers include: 'write tests for this', 'add unit tests', 'test my cubit', 'test my repository', 'write widget tests', 'improve test coverage', 'write a bloc_test', 'mock this dependency', 'add golden tests', 'how do I test X in Flutter', 'how should I test navigation', 'how do I test a freezed state', 'should I use mockito or mocktail', 'test my agent tool', 'test my domain service'. Always use alongside flutter-architecture when writing tests for existing features."
 ---
 
 # Flutter Testing
@@ -10,32 +9,27 @@ license: MIT
 
 | Test Type | Tool | What to Test |
 |-----------|------|--------------|
-| Cubits/BLoCs | `bloc_test` | Every method, all states, error paths |
-| Repositories | `mocktail` | API calls, mapping, errors |
-| Domain services | `flutter_test` + `mocktail` | Coordination logic, no cubit deps |
-| Agent tools | `flutter_test` + `mocktail` | Schema, execute(), error paths |
-| Widgets | `flutter_test` | States, taps, inputs |
-| Screens | `flutter_test` | Integration with fake cubits |
+| Cubits/BLoCs | `bloc_test` | Public methods, state order, error paths |
+| Repositories | `mocktail` | Parameter forwarding, DTO mapping, failure translation |
+| Domain services | `flutter_test` + `mocktail` | Coordination logic, edge cases, no cubit deps |
+| Agent tools | `flutter_test` + `mocktail` | Schema, `execute()`, error paths |
+| Widgets | `flutter_test` | UI branches, interactions, provider wiring |
+| Screens | `flutter_test` | Integration with fake or mock cubits |
 
-**Read `flutter-architecture` first** — tests must mirror architecture.
+**Read `flutter-architecture` first** — tests should mirror the intended boundaries and lifecycles.
 
 ## Setup
 
-```yaml
-dev_dependencies:
-  bloc_test: ^9.1.0
-  mocktail: ^1.0.0
-  golden_toolkit: ^0.15.0
-```
+Add `bloc_test` and `mocktail` when they are not already present. Add `golden_toolkit` only when the project uses golden tests. Match the repository existing version constraints instead of introducing pinned versions from this skill.
 
-## Test Structure (Mirrors lib/)
+## Test Structure (Mirrors `lib/`)
 
-```
+```text
 test/
 ├── core/
 │   ├── agent/
 │   │   └── tools/
-│   │       ├── weather_tool_test.dart   # one test file per tool
+│   │       ├── weather_tool_test.dart
 │   │       └── search_tool_test.dart
 │   └── services/
 │       └── talking_coordinator_service_test.dart
@@ -48,7 +42,7 @@ test/
             └── screens/login_screen_test.dart
 ```
 
-## Cubit Test (bloc_test)
+## Cubit Test (`bloc_test`)
 
 ```dart
 blocTest<AuthCubit, AuthState>(
@@ -66,12 +60,12 @@ blocTest<AuthCubit, AuthState>(
 );
 ```
 
-**Test every method, every state, every error path.**
+**Test every public method, every meaningful state transition, and every error path.**
 
-### Testing that a cubit uses a domain service (not another cubit)
+### Testing that a cubit uses a domain service
 
-When a cubit has been refactored to use a domain service instead of a cubit dependency,
-verify delegation — not the coordinator's internal behavior (that belongs in the service's own test).
+When a cubit delegates to a domain service, verify the delegation here and test the service's
+internal coordination in its own test file.
 
 ```dart
 class MockTalkingCoordinatorService extends Mock
@@ -90,15 +84,16 @@ blocTest<ChatTtsCubit, ChatTtsState>(
   act: (c) => c.startTts('Hello'),
   verify: (_) {
     verify(() => mockCoordinator.onTtsStarted()).called(1);
-    // Do NOT assert on TalkingCubit state here — that belongs in coordinator tests
   },
 );
 ```
 
 ## Repository Test
 
+A repository test should prove three things: correct API call, correct mapping, and correct failure translation.
+
 ```dart
-test('returns Right(User) on success', () async {
+test('maps API dto to domain user on success', () async {
   when(() => mockApi.login(
     email: any(named: 'email'),
     password: any(named: 'password'),
@@ -106,17 +101,41 @@ test('returns Right(User) on success', () async {
 
   final result = await repo.login('user@ex.com', 'pass');
 
-  expect(result.isRight(), true);
+  verify(() => mockApi.login(
+    email: 'user@ex.com',
+    password: 'pass',
+  )).called(1);
+
+  result.fold(
+    (_) => fail('Expected Right(User)'),
+    (user) {
+      expect(user.id, fakeUserDto.id);
+      expect(user.email, fakeUserDto.email);
+    },
+  );
+});
+
+test('translates ApiException into Failure', () async {
+  when(() => mockApi.login(
+    email: any(named: 'email'),
+    password: any(named: 'password'),
+  )).thenThrow(ApiException(message: 'Unauthorized'));
+
+  final result = await repo.login('user@ex.com', 'wrong');
+
+  result.fold(
+    (failure) => expect(failure.message, 'Unauthorized'),
+    (_) => fail('Expected Left(Failure)'),
+  );
 });
 ```
 
 ## Domain Service Test
 
-Domain services hold coordination logic extracted from cubits. Test them in
-pure isolation — no cubits, no widgets, no `blocTest`.
+Domain services hold coordination logic extracted from cubits. Test them in isolation:
+no widgets, no providers, no `blocTest` unless the service itself is a bloc.
 
 ```dart
-// test/core/services/talking_coordinator_service_test.dart
 void main() {
   late TalkingCoordinatorService service;
 
@@ -135,7 +154,6 @@ void main() {
     });
 
     test('onTtsStopped is idempotent when not talking', () {
-      // Should not throw when called without a prior onTtsStarted
       expect(() => service.onTtsStopped(), returnsNormally);
     });
   });
@@ -144,11 +162,10 @@ void main() {
 
 ## Agent Tool Test
 
-Every `AgentTool` implementation gets its own test file. Three things to always test:
-schema validity, happy path execution, and error handling.
+Every `AgentTool` implementation gets its own test file. Always cover schema, happy path,
+and error handling.
 
 ```dart
-// test/core/agent/tools/weather_tool_test.dart
 class MockWeatherService extends Mock implements WeatherService {}
 
 void main() {
@@ -161,13 +178,11 @@ void main() {
   });
 
   group('WeatherTool', () {
-    // 1. Schema — required fields are declared
     test('schema declares location as required', () {
       final required = tool.schema['required'] as List;
       expect(required, contains('location'));
     });
 
-    // 2. Happy path — correct args produce correct result
     test('execute returns weather data for valid location', () async {
       when(() => mockService.getCurrent('Paris'))
           .thenAnswer((_) async => fakeWeatherData);
@@ -178,7 +193,6 @@ void main() {
       verify(() => mockService.getCurrent('Paris')).called(1);
     });
 
-    // 3. Error path — service failure returns AgentResultError, never throws
     test('execute returns error result when service fails', () async {
       when(() => mockService.getCurrent(any()))
           .thenThrow(Exception('API unavailable'));
@@ -191,14 +205,25 @@ void main() {
 }
 ```
 
-**Rule:** Agent tool `execute()` must never throw — always return `AgentResultError`.
-If a tool can throw, that's a bug; write the error-path test first to catch it.
+**Rule:** Agent tool `execute()` must never throw. Return `AgentResultError` instead.
 
 ## Widget Test
 
+For widgets driven by a cubit, either use `MockCubit` + `whenListen` or a fake cubit that exposes a test-only helper method.
+
 ```dart
+class FakeAuthCubit extends Cubit<AuthState> implements AuthCubit {
+  FakeAuthCubit() : super(const AuthState.initial());
+
+  void pushState(AuthState nextState) => emit(nextState);
+
+  @override
+  Future<void> login(String e, String p) async {}
+}
+
 testWidgets('shows error on failure', (tester) async {
   final fakeCubit = FakeAuthCubit();
+  addTearDown(fakeCubit.close);
 
   await tester.pumpWidget(
     BlocProvider.value(
@@ -207,18 +232,11 @@ testWidgets('shows error on failure', (tester) async {
     ),
   );
 
-  fakeCubit.emit(const AuthState.failure('Error'));
+  fakeCubit.pushState(const AuthState.failure('Error'));
   await tester.pump();
 
   expect(find.text('Error'), findsOneWidget);
 });
-
-// Use FakeCubit for simple state emission
-class FakeAuthCubit extends Cubit<AuthState> implements AuthCubit {
-  FakeAuthCubit() : super(const AuthState.initial());
-  @override
-  Future<void> login(String e, String p) async {}
-}
 ```
 
 ## Golden Test
@@ -240,46 +258,47 @@ testGoldens('renders correctly', (tester) async {
 ## Coverage Checklist
 
 **Cubit/BLoC:**
-- [ ] Happy path (correct states in order)
-- [ ] Error path (failure emitted, not swallowed)
-- [ ] Loading state emitted first
-- [ ] `expect()` list is exact
-- [ ] Delegation to domain service verified (if applicable)
-- [ ] No assertions on other cubits' state
+- [ ] Happy path
+- [ ] Error path
+- [ ] Exact state order where it matters
+- [ ] Delegation to domain services verified
+- [ ] No assertions on another cubit's state
+
+**Repository:**
+- [ ] Arguments forwarded correctly
+- [ ] DTO mapped to domain entity/value object
+- [ ] `Left(Failure)` produced on errors
+- [ ] Failure message/type translated correctly
 
 **Domain service:**
 - [ ] Core coordination logic
-- [ ] Edge cases (idempotent calls, empty input)
-- [ ] No cubit imports in test file
+- [ ] Edge cases (idempotency, empty input, repeated calls)
+- [ ] No cubit imports in the test file
+
+**Widget/Screen:**
+- [ ] Each relevant UI branch
+- [ ] User interactions
+- [ ] Provider wiring for the expected subtree
 
 **Agent tool:**
 - [ ] Schema has required fields
-- [ ] Happy path `execute()` returns correct `AgentResult` type
-- [ ] Error path returns `AgentResultError` — never throws
-
-**Repository:**
-- [ ] DTO → entity mapping
-- [ ] `Right(value)` on success
-- [ ] `Left(Failure)` on errors
-- [ ] Exceptions wrapped
-
-**Widget:**
-- [ ] Each relevant state
-- [ ] User interactions
-- [ ] All UI branches
+- [ ] Happy path returns correct result type
+- [ ] Error path returns `AgentResultError`
 
 ## Anti-Patterns
 
 | ❌ Wrong | ✅ Fix |
 |---------|-------|
 | Test private vars | Test public state + behavior |
-| Real repos in tests | Inject mocks via constructor |
-| `pumpAndSettle()` everywhere | Use `pump(duration)` |
-| `state.runtimeType` | Use `isA<StateType>()` |
+| Real repos in tests | Inject mocks/fakes via constructor |
+| `pumpAndSettle()` everywhere | Prefer targeted `pump()` calls; use `pumpAndSettle()` only when you truly need it |
+| `state.runtimeType` | Use `isA<StateType>()` or assert a concrete state value |
+| Repository test only checks `isRight()` | Assert mapped value and failure translation |
 | Skip error paths | Every `try/catch` needs a test |
-| Use `mockito` | Use `mocktail` (no generation) |
+| Use `mockito` by default | Prefer `mocktail` to avoid generation unless the project already standardizes on something else |
 | Assert on another cubit's state in a cubit test | Test each cubit in isolation |
-| Agent tool `execute()` that throws | Return `AgentResultError` instead |
+| Call `emit()` directly from the test body | Use `whenListen`, `MockCubit`, or a fake helper like `pushState()` |
+| Agent tool `execute()` throws | Return `AgentResultError` instead |
 
 ## See Also
-- `mocktail-cheatsheet.md` — Full mocktail API reference, complete examples
+- `mocktail-cheatsheet.md` — Reference snippets and complete examples

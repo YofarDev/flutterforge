@@ -1,7 +1,6 @@
 ---
-name: flutter-architecture
-description: Use when creating new Flutter features, refactoring existing Flutter code, setting up project structure, implementing BLoC patterns, code reviews, or when users mention Flutter best practices, clean architecture, or maintainability concerns. Also use when wiring new cubits, modifying service_locator.dart, or any time a change might affect multiple features. Triggers include: "create feature", "refactor this", "project structure", "BLoC pattern", "code review", "best practices", "new cubit", "dependency injection".
-license: MIT
+name: "flutter-architecture"
+description: "Use when creating new Flutter features, refactoring existing Flutter code, setting up project structure, implementing BLoC patterns, or when users mention Flutter best practices, clean architecture, dependency injection, or maintainability concerns while actively changing code. Also use when wiring new cubits, modifying service_locator.dart, or any time a change might affect multiple features. For deep audits, architecture reviews, or migration plans, use flutter-audit instead. Triggers include: \"create feature\", \"refactor this\", \"project structure\", \"BLoC pattern\", \"new cubit\", \"dependency injection\", \"clean architecture\", \"service locator\"."
 ---
 
 # Flutter Architecture & Coding Standards
@@ -10,13 +9,13 @@ license: MIT
 
 | Task | Standard |
 |------|----------|
-| Features | Layered: `data/ → domain/ → presentation/` |
-| State | **Cubit default**; BLoC only for debounce/throttle |
+| Features | Layers: `presentation/ → domain/ ← data/` |
+| State | **Cubit default**; use BLoC when explicit events or concurrency policies improve clarity |
 | Listeners | **Always `MultiBlocListener`** — never nest |
 | Files | Split when a file has **more than one reason to change**, not by line count |
-| Models | `freezed` — immutable, sealed, exhaustive |
+| Models | `freezed` preferred; plain sealed immutable models/states are acceptable when exhaustive |
 | Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz) |
-| DI | `get_it` — **all wiring in `service_locator.dart` only** |
+| DI | `get_it` — registrations in `service_locator.dart`; resolve from app/route composition roots |
 | Cubit deps | **Cubits never depend on other cubits** — use domain services |
 
 ---
@@ -26,7 +25,7 @@ license: MIT
 ```
 lib/
 ├── main.dart              # runApp() only — no wiring, no logic
-├── app.dart               # MaterialApp.router + MultiBlocProvider (reads getIt only)
+├── app.dart               # MaterialApp.router + app-scoped providers (reads getIt only)
 ├── core/
 │   ├── di/
 │   │   └── service_locator.dart   # Single source of truth for all wiring
@@ -50,9 +49,22 @@ lib/
             └── widgets/
 ```
 
-**Dependencies flow inward only:** `presentation → domain → data`
+**Dependencies flow inward only:** `presentation → domain ← data`
 
-**Cross-feature rule:** Features never import from each other. All shared code lives in `core/`.
+`domain` owns business rules, entities, and repository contracts. `data` depends on `domain` to implement those contracts.
+
+**Cross-feature rule:** Features should not import each other's internals. Shared infrastructure can live in `core/`; shared business capabilities should expose a small public API or move to a dedicated module/package instead of turning `core/` into a dumping ground.
+
+## Modularity Beyond Folders
+
+Start with feature folders inside one app package. Extract a feature into a Dart/Flutter package only when it has a stable public API, meaningful independent tests, or needs to be reused across apps.
+
+Use these module boundaries:
+- `core/` for app-wide infrastructure: DI, routing, networking, theming, logging, shared primitives
+- feature modules for business capabilities and UI flows
+- dedicated shared modules/packages for business logic reused by multiple features
+
+When one module depends on another, depend on its public contract only. Never import another module's `presentation/` layer or private `data/` internals.
 
 ---
 
@@ -60,12 +72,12 @@ lib/
 
 These two rules prevent the majority of "add a feature, break something else" regressions.
 
-### Rule 1: One place for DI — service_locator.dart only
+### Rule 1: One place for dependency registration — `service_locator.dart`
 
-`main.dart` and `app.dart` must only **read** from `getIt`. They never construct cubits or services manually.
+`service_locator.dart` is the single source of truth for registrations and lifetimes. Composition roots such as `app.dart`, route builders, and tests may **resolve** from `getIt`, but they should not manually assemble repository/service graphs.
 
 ```dart
-// ✅ CORRECT — app.dart
+// ✅ CORRECT — app-scoped provider resolved from DI
 MultiBlocProvider(
   providers: [
     BlocProvider(create: (_) => getIt<ChatCubit>()..init()),
@@ -74,7 +86,13 @@ MultiBlocProvider(
   child: MaterialApp.router(...),
 )
 
-// ❌ WRONG — constructing manually bypasses DI and creates a second wiring layer
+// ✅ CORRECT — route-scoped provider with runtime parameter
+BlocProvider(
+  create: (_) => getIt<ProfileCubit>(param1: userId)..load(),
+  child: const ProfileScreen(),
+)
+
+// ❌ WRONG — manual construction bypasses DI and creates a second wiring layer
 BlocProvider(
   create: (context) => MyCubit(
     repo: getIt<MyRepository>(),
@@ -82,6 +100,8 @@ BlocProvider(
   ),
 )
 ```
+
+App-scoped providers are for truly app-wide state. Screen and flow state should usually stay route-scoped so it resets naturally with navigation.
 
 ### Rule 2: Cubits never depend on other cubits
 
@@ -112,7 +132,7 @@ class AuthCubit extends Cubit<AuthState> {
 
 ---
 
-## State Pattern (freezed — always)
+## State Pattern (`freezed` default; sealed states acceptable)
 
 ```dart
 @freezed
@@ -131,6 +151,8 @@ state.when(
   failure: (msg) => ErrorBanner(message: msg),
 );
 ```
+
+Use `freezed` by default for union ergonomics such as `when`, `map`, and `copyWith`. Plain Dart sealed states are also acceptable when they stay immutable and the UI handles them exhaustively.
 
 ---
 
@@ -157,10 +179,10 @@ Coordination logic that previously lived *between* micro-cubits moves *into* the
 
 ## Cubit vs BLoC
 
-Use **Cubit** by default (90% of cases). Only use full BLoC when you need event transformers.
+Use **Cubit** by default (90% of cases). Reach for full **BLoC** when explicit events make the workflow clearer or when you need concurrency control such as debounce, throttle, cancellation, restartable work, or droppable events.
 
 ```dart
-// Use BLoC only when you need debounce / switchMap / throttle
+// Use BLoC when explicit events and event transformers clarify the workflow
 class SearchBloc extends Bloc<SearchEvent, SearchState> {
   SearchBloc(this._repo) : super(const SearchState.initial()) {
     on<QueryChanged>(
@@ -214,7 +236,7 @@ class AuthRepositoryImpl implements IAuthRepository {
   Future<Either<Failure, User>> login(String email, String password) async {
     try {
       final dto = await _api.login(email: email, password: password);
-      return Right(User.fromDto(dto));
+      return Right(dto.toDomain());
     } on ApiException catch (e) {
       return Left(Failure(e.message));
     } catch (e) {
@@ -238,14 +260,16 @@ getIt.registerLazySingleton<TtsService>(() => TtsService());
 getIt.registerFactory<AuthCubit>(() => AuthCubit(getIt<IAuthRepository>()));
 ```
 
+Prefer `registerFactory` or `registerFactoryParam` for cubits unless the state is intentionally app-wide and long-lived.
+
 ---
 
-## Service → UI Communication (streams, not cubit refs)
+## Service → UI Communication (domain events, not cubit refs)
 
 When a domain service needs to trigger UI state changes, the dependency arrow must point
 **inward only** — the cubit knows about the service, never the reverse.
 
-The pattern: the service exposes a **broadcast stream**, the cubit subscribes to it.
+For event-like signals, the service can expose a stream and the cubit subscribes to it. For durable state, prefer a service or repository that exposes current state plus updates instead of a fire-and-forget event bus.
 
 ```dart
 // ✅ CORRECT — service owns the stream, knows nothing about cubits
@@ -296,7 +320,9 @@ class AvatarAnimationService {
 ```
 
 > **Rule:** If registering a service requires passing `getIt<SomeCubit>()` as an argument,
-> the dependency arrow is pointing the wrong way. Flip it with a stream.
+> the dependency arrow is pointing the wrong way. Flip it with a stream or another domain-facing abstraction.
+
+Use broadcast streams for ephemeral events such as animations, toasts, or one-off external triggers. If late subscribers must receive the latest value, expose current state separately or use a stateful stream abstraction at the domain layer.
 
 ---
 
@@ -307,15 +333,16 @@ class AvatarAnimationService {
 | Navigate in `build()` | Use `BlocListener` |
 | Nested `BlocListener`s | Use `MultiBlocListener` |
 | Services instantiated in widgets | Inject via `get_it` |
-| Cross-feature imports | Route through `core/` only |
-| Helper methods in widgets (`_buildX()`) | Extract to separate widget classes |
+| Cross-feature imports into internals | Depend on a public contract, shared module/package, or `core/` infrastructure |
+| Helper methods in widgets (`_buildX()`) | Extract only when the piece has a clear, standalone name and purpose; otherwise a small local helper is fine |
 | Splitting a file just to reduce line count | Only extract when the piece has a clear, standalone name and purpose — a 600-line cubit handling one coherent feature is better than three 150-line cubits that depend on each other |
 | `BlocBuilder` wrapping entire `Scaffold` | Wrap only the widget that needs state |
-| Manual cubit construction in `app.dart` | Always use `getIt<MyCubit>()` |
+| Manual cubit construction in composition roots | Resolve via `getIt<MyCubit>()`; keep registrations in `service_locator.dart` |
 | Cubit depending on another cubit | Extract shared logic to domain service |
 | `context.read` after `await` | Capture reference before the `await` |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
-| Service holding a cubit ref (even via interface) | Expose a stream; cubit subscribes |
+| Service holding a cubit ref (even via interface) | Publish domain events or durable domain state; cubit subscribes/reads |
+| Everything shared goes in `core/` | Keep `core/` for infrastructure; extract stable shared business logic into a dedicated module/package |
 
 ---
 
@@ -355,10 +382,18 @@ Signs a file does **not** need splitting:
 2. **Design the freezed state first** — what does the UI actually need?
 3. **Define the repository interface before the implementation**
 4. **Does the new cubit need to react to another cubit?** — if yes, extract a domain service instead
-5. **Register in `service_locator.dart` only** — never wire in `app.dart` or screens
+5. **Register dependencies in `service_locator.dart`** — keep registration and lifetimes in one place
+6. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope
+7. **Add architecture tests** — repository mapping/failure tests, cubit/bloc state tests, and a DI smoke test for new registrations
+
+## Minimum Architecture Tests
+
+- repository tests for DTO-to-domain mapping and failure translation
+- cubit/bloc tests for the important state transitions
+- widget tests for critical screens with their providers/listeners wired
+- a DI smoke test for new registrations or `registerFactoryParam` flows
 
 ---
 
 ## See Also
-- `examples.md` — Cubit vs BLoC, DI setup, routing examples
-- `anti-patterns.md` — Common mistakes with before/after fixes
+- `examples.md` — Cubit vs BLoC, DI setup, routing, and common anti-pattern corrections

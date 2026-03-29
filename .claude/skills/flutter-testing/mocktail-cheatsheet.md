@@ -20,7 +20,7 @@ verifyNever(() => mock.method(any()));
 final captured = verify(() => mock.method(captureAny())).captured;
 expect(captured.single, expectedArg);
 
-// Stream for cubits (bloc_test)
+// Streams for cubits/blocs
 whenListen(mockCubit, Stream.fromIterable([state1, state2]));
 
 // Register fallback values for custom types
@@ -32,7 +32,7 @@ setUpAll(() {
 
 ## Complete Test Examples
 
-### Cubit Test with bloc_test
+### Cubit Test with `bloc_test`
 
 ```dart
 import 'package:bloc_test/bloc_test.dart';
@@ -80,24 +80,6 @@ void main() {
         const AuthState.failure('Invalid credentials'),
       ],
     );
-
-    blocTest<AuthCubit, AuthState>(
-      'emits [loading, failure] on unexpected exception',
-      build: () {
-        when(() => mockRepo.login(any(), any()))
-            .thenThrow(Exception('Network error'));
-        return cubit;
-      },
-      act: (c) => c.login('a@b.com', 'pass'),
-      expect: () => [
-        const AuthState.loading(),
-        isA<AuthState>().having(
-          (s) => s.whenOrNull(failure: (msg) => msg),
-          'has failure message',
-          isNotNull,
-        ),
-      ],
-    );
   });
 }
 ```
@@ -117,7 +99,7 @@ void main() {
   });
 
   group('AuthRepository.login', () {
-    test('returns Right(User) on successful API call', () async {
+    test('maps dto to domain user on success', () async {
       when(() => mockApi.login(
         email: any(named: 'email'),
         password: any(named: 'password'),
@@ -125,14 +107,18 @@ void main() {
 
       final result = await repo.login('a@b.com', 'pass');
 
-      expect(result.isRight(), true);
+      verify(() => mockApi.login(
+        email: 'a@b.com',
+        password: 'pass',
+      )).called(1);
+
       result.fold(
-        (_) => fail('Expected Right'),
+        (_) => fail('Expected Right(User)'),
         (user) => expect(user.id, fakeUserDto.id),
       );
     });
 
-    test('returns Left(Failure) on 401', () async {
+    test('returns Left(Failure) on API exception', () async {
       when(() => mockApi.login(
         email: any(named: 'email'),
         password: any(named: 'password'),
@@ -140,7 +126,10 @@ void main() {
 
       final result = await repo.login('a@b.com', 'wrong');
 
-      expect(result.isLeft(), true);
+      result.fold(
+        (failure) => expect(failure.message, 'Unauthorized'),
+        (_) => fail('Expected Left(Failure)'),
+      );
     });
   });
 }
@@ -149,19 +138,26 @@ void main() {
 ### Widget Test
 
 ```dart
+class MockAuthCubit extends MockCubit<AuthState> implements AuthCubit {}
+
 void main() {
   group('LoginForm', () {
     testWidgets('shows error banner when state is failure', (tester) async {
-      final fakeCubit = FakeAuthCubit();
+      final mockCubit = MockAuthCubit();
+      when(() => mockCubit.state).thenReturn(const AuthState.initial());
+      whenListen(
+        mockCubit,
+        Stream.fromIterable([const AuthState.failure('Invalid credentials')]),
+        initialState: const AuthState.initial(),
+      );
 
       await tester.pumpWidget(
         BlocProvider<AuthCubit>.value(
-          value: fakeCubit,
+          value: mockCubit,
           child: const MaterialApp(home: Scaffold(body: LoginForm())),
         ),
       );
 
-      fakeCubit.emit(const AuthState.failure('Invalid credentials'));
       await tester.pump();
 
       expect(find.text('Invalid credentials'), findsOneWidget);
@@ -179,14 +175,8 @@ void main() {
         ),
       );
 
-      await tester.enterText(
-        find.byKey(const Key('email_field')),
-        'a@b.com',
-      );
-      await tester.enterText(
-        find.byKey(const Key('password_field')),
-        'pass',
-      );
+      await tester.enterText(find.byKey(const Key('email_field')), 'a@b.com');
+      await tester.enterText(find.byKey(const Key('password_field')), 'pass');
       await tester.tap(find.byKey(const Key('login_button')));
       await tester.pump();
 
@@ -196,27 +186,11 @@ void main() {
 }
 ```
 
-### Mocking a Cubit for Widget Tests
-
-```dart
-// Use mocktail — stubs state stream and state getter
-class MockAuthCubit extends MockCubit<AuthState> implements AuthCubit {}
-
-// Use FakeCubit for simple state emission
-class FakeAuthCubit extends Cubit<AuthState> implements AuthCubit {
-  FakeAuthCubit() : super(const AuthState.initial());
-
-  @override
-  Future<void> login(String email, String password) async {
-    emit(const AuthState.loading());
-  }
-}
-```
-
 ### Screen Integration Test
 
 ```dart
 class MockGoRouter extends Mock implements GoRouter {}
+class MockAuthCubit extends MockCubit<AuthState> implements AuthCubit {}
 
 void main() {
   testWidgets('navigates to home after successful login', (tester) async {
@@ -230,6 +204,7 @@ void main() {
         const AuthState.loading(),
         AuthState.authenticated(fakeUser),
       ]),
+      initialState: const AuthState.initial(),
     );
 
     await tester.pumpWidget(
@@ -262,7 +237,7 @@ void main() {
         value: mockCubit,
         child: const LoginScreen(),
       ),
-      surfaceSize: const Size(390, 844), // iPhone 14 Pro
+      surfaceSize: const Size(390, 844),
     );
 
     await screenMatchesGolden(tester, 'login_screen_initial');

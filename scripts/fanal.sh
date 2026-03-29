@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================
-# flutter_preanalysis.sh  (fanal)
-# Compact pre-analysis of a Flutter project for LLM audit.
+# fanal.sh
+# Compact pre-analysis of a Flutter project for LLM-assisted audit.
 #
 # Usage:
-#   ./flutter_preanalysis.sh [path/to/flutter/project]
-#   ./flutter_preanalysis.sh          # defaults to current dir
+#   ./fanal.sh [path/to/flutter/project]
+#   ./fanal.sh                     # defaults to current dir
 #
 # Output:
-#   flutter_analysis_<timestamp>.md   # written next to this script
+#   <project>/flutter_analysis_<timestamp>.md
 # ============================================================
 
 set -euo pipefail
@@ -18,163 +18,127 @@ PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 LIB_DIR="$PROJECT_DIR/lib"
 FEATURES_DIR="$LIB_DIR/features"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUT_FILE="$(pwd)/flutter_analysis_${TIMESTAMP}.md"
+OUT_FILE="$PROJECT_DIR/flutter_analysis_${TIMESTAMP}.md"
 
-# ── Helpers ────────────────────────────────────────────────
-h2()  { echo ""; echo "## $*"; }
-info(){ echo "$*"; }
-
-dart_files() {
-  find "$LIB_DIR" -name "*.dart" \
-    ! -name "*.g.dart" \
-    ! -name "*.freezed.dart" \
-    2>/dev/null
+h2() {
+  echo ""
+  echo "## $*"
 }
 
-lines_in_file() { wc -l < "$1" | tr -d ' '; }
+info() {
+  echo "$*"
+}
 
-# ── Start writing report ────────────────────────────────────
-{
+relpath() {
+  echo "${1#$PROJECT_DIR/}"
+}
 
-info "# Flutter Pre-Analysis — $(date +%Y-%m-%d)"
-info "_Project: \`$PROJECT_DIR\`_"
+is_ignored_file() {
+  case "$1" in
+    *.g.dart|*.freezed.dart|*.gen.dart|*.gr.dart|*.mocks.dart)
+      return 0
+      ;;
+    */l10n/generated/*|*/generated/l10n/*|*/flutter_gen/*|*/firebase_options.dart)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
-# ── 0. File tree ────────────────────────────────────────────
-h2 "File tree"
+list_dart_files() {
+  find "$LIB_DIR" -type f -name "*.dart" ! -name ".gitkeep" 2>/dev/null | sort
+}
 
-if [[ -d "$FEATURES_DIR" ]]; then
-  FEAT_NAMES=$(find "$FEATURES_DIR" -mindepth 1 -maxdepth 1 -type d \
-    | sort | xargs -I{} basename {} | tr '\n' ' ' | sed 's/ $//')
-  info "_Features: ${FEAT_NAMES}_"
-  info ""
-fi
-
-info '```'
-NODE=0
-while IFS= read -r f; do
-  rel="${f#${LIB_DIR}/}"
-  slashes=$(echo "$rel" | tr -cd '/' | wc -c)
-  rel_depth=$(( slashes > 0 ? slashes - 1 : 0 ))
-  indent=""
-  for (( i=0; i<rel_depth; i++ )); do indent+="│   "; done
-  base=$(basename "$f")
-
-  lc=$(wc -l < "$f" | tr -d ' ')
-  limit=300
-  echo "$base" | grep -qiE '(service|repository|repo|api)' && limit=400
-  flag=""
-  [[ "$lc" -gt "$limit" ]] && flag=" (!)"
-
-  NODE=$((NODE + 1))
-  printf '%s+-- [%d] %s  (%d lines)%s\n' "$indent" "$NODE" "$base" "$lc" "$flag"
-done < <(
-  find "$LIB_DIR" -type f -name "*.dart" \
-    ! -name "*.g.dart" \
-    ! -name "*.freezed.dart" \
-    ! -name ".gitkeep" \
-    | sort
-)
-info '```'
-
-# ── 1. Feature map ──────────────────────────────────────────
-h2 "Feature map"
-if [[ -d "$FEATURES_DIR" ]]; then
-  while IFS= read -r feat; do
-    name=$(basename "$feat")
-    layers=""
-    [[ -d "$feat/data" ]]         && layers+="data "
-    [[ -d "$feat/domain" ]]       && layers+="domain "
-    [[ -d "$feat/presentation" ]] && layers+="presentation"
-    info "- **$name**: ${layers:-⚠️ no standard layers}"
-  done < <(find "$FEATURES_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
-else
-  info "❌ No \`lib/features/\` directory found"
-fi
-
-# ── 2. Core layout ──────────────────────────────────────────
-h2 "Core layout"
-CORE_DIR="$LIB_DIR/core"
-if [[ -d "$CORE_DIR" ]]; then
-  for sub in agent audio avatar di llm router models services utils widgets; do
-    if [[ -d "$CORE_DIR/$sub" ]]; then
-      echo "✅ core/$sub"
-    else
-      # Distinguish expected new dirs from original ones
-      case "$sub" in
-        agent|audio|avatar|llm) echo "⚠️  core/$sub (missing — recommended for solid agent architecture)" ;;
-        *) echo "❌ core/$sub" ;;
-      esac
-    fi
-  done
-else
-  info "❌ No \`lib/core/\` directory found"
-fi
-
-# ── 3. File size violations ─────────────────────────────────
-h2 "File size violations"
-info "_Limits: general ≤300 · service/repo/api ≤400_"
-FOUND=0
-while IFS= read -r f; do
-  lc=$(lines_in_file "$f")
-  limit=300
-  base=$(basename "$f")
-  echo "$base" | grep -qiE '(service|repository|repo|api)' && limit=400
-  if [[ "$lc" -gt "$limit" ]]; then
-    info "- \`${f#$PROJECT_DIR/}\` — $lc lines (limit $limit)"
-    FOUND=1
-  fi
-done < <(dart_files)
-[[ "$FOUND" -eq 0 ]] && info "✅ None"
-
-# ── 4. Cross-feature imports ────────────────────────────────
-h2 "Cross-feature imports"
-if [[ -d "$FEATURES_DIR" ]]; then
-  FOUND=0
+dart_files() {
   while IFS= read -r f; do
-    current=$(echo "$f" | sed "s|$FEATURES_DIR/||" | cut -d'/' -f1)
-    while IFS= read -r line; do
-      imported=$(echo "$line" | grep -oE "features/[^/'\"]+" || true)
-      if [[ -n "$imported" ]]; then
-        target=$(echo "$imported" | cut -d'/' -f2)
-        if [[ -n "$target" && "$target" != "$current" ]]; then
-          [[ "$FOUND" -eq 0 ]] && info ""
-          info "- \`${f#$PROJECT_DIR/}\`: **$current** → **$target**"
-          info "  \`$line\`"
-          FOUND=1
-        fi
-      fi
-    done < <(grep -n "^import" "$f" 2>/dev/null || true)
-  done < <(dart_files | grep -F "$FEATURES_DIR" || true)
-  [[ "$FOUND" -eq 0 ]] && info "✅ None"
-else
-  info "⚠️ No features/ dir — skipped"
-fi
+    if ! is_ignored_file "$f"; then
+      echo "$f"
+    fi
+  done < <(list_dart_files)
+}
 
-# ── 5. Anti-pattern scan ────────────────────────────────────
-h2 "Anti-pattern scan"
+feature_dirs() {
+  if [[ -d "$FEATURES_DIR" ]]; then
+    find "$FEATURES_DIR" -mindepth 1 -maxdepth 1 -type d | sort
+  fi
+}
+
+lines_in_file() {
+  wc -l < "$1" | tr -d ' '
+}
+
+count_dart_files_in_dir() {
+  local dir="$1"
+  local count=0
+
+  while IFS= read -r f; do
+    if ! is_ignored_file "$f"; then
+      count=$((count + 1))
+    fi
+  done < <(find "$dir" -type f -name "*.dart" ! -name ".gitkeep" 2>/dev/null | sort)
+
+  echo "$count"
+}
+
+count_pattern_matches() {
+  local pattern="$1"
+  local count=0
+  local matches
+
+  while IFS= read -r f; do
+    matches=$(grep -cE "$pattern" "$f" 2>/dev/null || true)
+    count=$((count + matches))
+  done < <(dart_files)
+
+  echo "$count"
+}
 
 scan_files() {
-  local label="$1" pattern="$2" exclude="${3:-__none__}"
-  local hits
-  hits=$(dart_files | xargs grep -l "$pattern" 2>/dev/null \
-    | grep -v "$exclude" || true)
-  if [[ -n "$hits" ]]; then
-    info ""
-    info "**$label**"
-    while IFS= read -r f; do
-      info "- \`${f#$PROJECT_DIR/}\`"
-    done <<< "$hits"
-  fi
+  local label="$1"
+  local pattern="$2"
+  local exclude="${3:-__none__}"
+  local found=0
+
+  while IFS= read -r f; do
+    if [[ "$exclude" != "__none__" ]] && echo "$f" | grep -Eq "$exclude"; then
+      continue
+    fi
+
+    if grep -qE "$pattern" "$f" 2>/dev/null; then
+      if [[ "$found" -eq 0 ]]; then
+        info ""
+        info "**$label**"
+        found=1
+      fi
+      info "- \`$(relpath "$f")\`"
+    fi
+  done < <(dart_files)
 }
 
 scan_lines() {
-  local label="$1" pattern="$2" cap="${3:-3}"
+  local label="$1"
+  local pattern="$2"
+  local cap="${3:-3}"
+  local exclude="${4:-__none__}"
   local found=0
+  local matches
+  local rel
+
   while IFS= read -r f; do
-    matches=$(grep -n "$pattern" "$f" 2>/dev/null | head -"$cap" || true)
+    if [[ "$exclude" != "__none__" ]] && echo "$f" | grep -Eq "$exclude"; then
+      continue
+    fi
+
+    matches=$(grep -nE "$pattern" "$f" 2>/dev/null | head -"$cap" || true)
     if [[ -n "$matches" ]]; then
-      [[ "$found" -eq 0 ]] && { info ""; info "**$label**"; found=1; }
-      rel="${f#$PROJECT_DIR/}"
+      if [[ "$found" -eq 0 ]]; then
+        info ""
+        info "**$label**"
+        found=1
+      fi
+      rel="$(relpath "$f")"
       while IFS= read -r line; do
         info "- \`$rel:$line\`"
       done <<< "$matches"
@@ -182,117 +146,242 @@ scan_lines() {
   done < <(dart_files)
 }
 
-scan_files  "Hardcoded colors (use colorScheme)"          "Colors\.\|Color(0x"
-scan_files  "print / debugPrint (use AppLogger)"           "print(\|debugPrint(" "logger.dart"
-scan_lines  "Navigation in build() (use BlocListener)"    "context\.go(\|GoRouter\.of(context)\.go" 3
-scan_lines  "Widget helper methods (extract to class)"     "Widget _build" 3
-scan_lines  "Nested BlocListeners (use MultiBlocListener)" "child:.*BlocListener\b" 3
+{
+  info "# Flutter Pre-Analysis - $(date +%Y-%m-%d)"
+  info "_Project: \`$PROJECT_DIR\`_"
+  info ""
+  info "_This report is heuristic only. Use it to guide the audit, not to replace file reads._"
 
-# ── 6. DI wiring integrity ──────────────────────────────────
-h2 "DI wiring integrity"
-
-SL_FILE=$(dart_files | grep -E 'service_locator\.dart|injection\.dart' | head -1 || true)
-if [[ -n "$SL_FILE" ]]; then
-  rel="${SL_FILE#$PROJECT_DIR/}"
-  REG_COUNT=$(grep -c "registerLazy\|registerFactory\|registerSingleton" "$SL_FILE" 2>/dev/null || echo 0)
-  info "✅ \`$rel\` — $REG_COUNT registration(s)"
-
-  # Dual wiring: cubits constructed manually outside service_locator
-  DUAL_WIRING=$(dart_files | grep -v "$(basename "$SL_FILE")" \
-    | xargs grep -ln "Cubit(\|Bloc(" 2>/dev/null \
-    | grep -v "_test\.dart\|_cubit\.dart\|_bloc\.dart\|_state\.dart" || true)
-  if [[ -n "$DUAL_WIRING" ]]; then
-    info ""
-    info "⚠️  **Dual wiring — cubits constructed outside service_locator** (should use getIt only):"
-    while IFS= read -r f; do
-      info "  - \`${f#$PROJECT_DIR/}\`"
-      grep -n "Cubit(\|Bloc(" "$f" 2>/dev/null | grep -v "//" | head -3 | while IFS= read -r line; do
-        info "    \`$line\`"
-      done
-    done <<< "$DUAL_WIRING"
+  h2 "Lib overview"
+  if [[ -d "$LIB_DIR" ]]; then
+    info '```text'
+    info 'lib/'
+    while IFS= read -r entry; do
+      rel="${entry#$LIB_DIR/}"
+      if [[ -d "$entry" ]]; then
+        count=$(count_dart_files_in_dir "$entry")
+        printf '+-- %s/ (%d dart files)\n' "$rel" "$count"
+      else
+        printf '+-- %s (%d lines)\n' "$rel" "$(lines_in_file "$entry")"
+      fi
+    done < <(find "$LIB_DIR" -mindepth 1 -maxdepth 1 \( -type d -o -type f \) | sort)
+    info '```'
   else
-    info "✅ No dual wiring detected"
+    info "❌ No \`lib/\` directory found"
   fi
-else
-  info "❌ No service_locator.dart / injection.dart found"
-fi
 
-# ── 7. Cubit coupling analysis ──────────────────────────────
-h2 "Cubit coupling analysis"
+  h2 "Feature map"
+  if [[ -d "$FEATURES_DIR" ]]; then
+    while IFS= read -r feat; do
+      name=$(basename "$feat")
+      layers=()
+      [[ -d "$feat/data" ]] && layers+=("data")
+      [[ -d "$feat/domain" ]] && layers+=("domain")
+      [[ -d "$feat/presentation" ]] && layers+=("presentation")
+      file_count=$(count_dart_files_in_dir "$feat")
+      cubit_count=$(find "$feat" -type f \( -name "*_cubit.dart" -o -name "*_bloc.dart" \) 2>/dev/null | wc -l | tr -d ' ')
+      info "- **$name**: ${layers[*]:-no standard layers} | $file_count dart files | $cubit_count cubits/blocs"
+    done < <(feature_dirs)
+  else
+    info "⚠️ No \`lib/features/\` directory found"
+  fi
 
-# Count cubits per feature
-if [[ -d "$FEATURES_DIR" ]]; then
-  info "**Cubit count per feature** (>2 warrants review):"
-  while IFS= read -r feat; do
-    name=$(basename "$feat")
-    count=$(find "$feat" -name "*_cubit.dart" -o -name "*_bloc.dart" 2>/dev/null | wc -l | tr -d ' ')
-    if [[ "$count" -gt 2 ]]; then
-      info "- ⚠️  **$name**: $count cubits/blocs — consider consolidating"
+  h2 "Core layout"
+  CORE_DIR="$LIB_DIR/core"
+  if [[ -d "$CORE_DIR" ]]; then
+    CORE_SUBDIRS=$(find "$CORE_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | xargs -I{} basename {} | sort | tr '\n' ' ' | sed 's/ $//')
+    if [[ -n "$CORE_SUBDIRS" ]]; then
+      info "Present directories: $CORE_SUBDIRS"
     else
-      info "- ✅ $name: $count"
+      info "⚠️ \`lib/core/\` exists but has no subdirectories"
     fi
-  done < <(find "$FEATURES_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
-fi
 
-# Cubit-to-cubit dependencies (constructor injection of one cubit into another)
-info ""
-info "**Cubit-to-cubit dependencies** (should be 0 — use domain services instead):"
-FOUND=0
-while IFS= read -r f; do
-  base=$(basename "$f")
-  # Only check cubit/bloc files
-  if echo "$base" | grep -qE '_cubit\.dart|_bloc\.dart'; then
-    # Look for other Cubit/Bloc types in constructor params
-    matches=$(grep -n "final.*Cubit\|final.*Bloc\b" "$f" 2>/dev/null || true)
+    for sub in di router; do
+      if [[ -d "$CORE_DIR/$sub" ]]; then
+        info "✅ core/$sub"
+      else
+        info "⚠️ core/$sub missing"
+      fi
+    done
+  else
+    info "⚠️ No \`lib/core/\` directory found"
+  fi
+
+  h2 "Large files to inspect"
+  info "_Heuristic only. Long files are cohesion review candidates, not automatic violations._"
+  info "_Thresholds: general >300 | screen/widget/cubit/bloc >350 | service/repo/api >400_"
+  FOUND=0
+  while IFS= read -r f; do
+    rel="$(relpath "$f")"
+    base=$(basename "$f")
+    lc=$(lines_in_file "$f")
+    limit=300
+
+    if echo "$base" | grep -qiE '(service|repository|repo|api)'; then
+      limit=400
+    elif echo "$base" | grep -qiE '(_cubit|_bloc|screen|dialog|sheet|widget)\.dart$'; then
+      limit=350
+    fi
+
+    if [[ "$lc" -gt "$limit" ]]; then
+      info "- \`$rel\` - $lc lines (threshold $limit)"
+      FOUND=1
+    fi
+  done < <(dart_files)
+  [[ "$FOUND" -eq 0 ]] && info "✅ None"
+
+  h2 "Cross-feature imports"
+  if [[ -d "$FEATURES_DIR" ]]; then
+    INTERNAL_FOUND=0
+    DOMAIN_FOUND=0
+
+    while IFS= read -r f; do
+      current=$(echo "$f" | sed "s|$FEATURES_DIR/||" | cut -d'/' -f1)
+      while IFS= read -r line; do
+        imported=$(echo "$line" | grep -oE "features/[^'\"]+" || true)
+        if [[ -z "$imported" ]]; then
+          continue
+        fi
+
+        target=$(echo "$imported" | cut -d'/' -f2)
+        layer=$(echo "$imported" | cut -d'/' -f3)
+
+        if [[ -z "$target" || "$target" == "$current" ]]; then
+          continue
+        fi
+
+        if [[ "$layer" == "data" || "$layer" == "presentation" ]]; then
+          if [[ "$INTERNAL_FOUND" -eq 0 ]]; then
+            info ""
+            info "**Imports into another feature's internal layers**"
+            INTERNAL_FOUND=1
+          fi
+          info "- \`$(relpath "$f")\`: **$current** -> **$target/$layer**"
+          info "  \`$line\`"
+        else
+          if [[ "$DOMAIN_FOUND" -eq 0 ]]; then
+            info ""
+            info "**Cross-feature domain/shared imports to review**"
+            DOMAIN_FOUND=1
+          fi
+          info "- \`$(relpath "$f")\`: **$current** -> **$target/$layer**"
+          info "  \`$line\`"
+        fi
+      done < <(grep -n '^import' "$f" 2>/dev/null || true)
+    done < <(dart_files | grep -F "$FEATURES_DIR" || true)
+
+    [[ "$INTERNAL_FOUND" -eq 0 ]] && info "✅ No imports into another feature's data/presentation layers"
+    [[ "$DOMAIN_FOUND" -eq 0 ]] && info "✅ No cross-feature domain/shared imports to review"
+  else
+    info "⚠️ No features directory - skipped"
+  fi
+
+  h2 "Heuristic signals"
+  info "_These are grep-based leads. Inspect surrounding code before turning them into audit findings._"
+
+  scan_files "Direct color usage to inspect" "Colors\\.|Color\\(0x" "app_colors\\.dart|app_theme\\.dart|studio_theme\\.dart|app_text_theme\\.dart"
+  scan_files "print / debugPrint to inspect" "print\\(|debugPrint\\(" "logger\\.dart"
+  scan_lines "GoRouter navigation calls to inspect" "context\\.go\\(|context\\.push\\(|GoRouter\\.of\\(context\\)\\.(go|push)" 5
+  scan_lines "Widget helper methods to inspect" "Widget _build" 3
+  scan_lines "Nested BlocListener patterns to inspect" "child:.*BlocListener\\b" 5
+  scan_lines "BlocConsumer usage to inspect" "BlocConsumer<" 5
+
+  h2 "DI wiring integrity"
+  SL_FILE=$(dart_files | grep -E '/(service_locator|injection)\.dart$' | head -1 || true)
+  if [[ -n "$SL_FILE" ]]; then
+    rel="$(relpath "$SL_FILE")"
+    REG_COUNT=$(grep -Ec 'register(LazySingleton|Singleton|Factory|FactoryParam)' "$SL_FILE" 2>/dev/null || echo 0)
+    info "✅ \`$rel\` - $REG_COUNT registration(s)"
+
+    FOUND=0
+    while IFS= read -r f; do
+      matches=$(grep -nE 'create:.*=>.*[A-Za-z0-9_]+(Cubit|Bloc)\(' "$f" 2>/dev/null | grep -v 'getIt<' || true)
+      if [[ -n "$matches" ]]; then
+        if [[ "$FOUND" -eq 0 ]]; then
+          info ""
+          info "**Potential manual cubit/bloc construction outside DI-backed composition roots**"
+          FOUND=1
+        fi
+        info "- \`$(relpath "$f")\`"
+        while IFS= read -r line; do
+          info "  \`$line\`"
+        done <<< "$matches"
+      fi
+    done < <(dart_files | grep -vE '/(service_locator|injection)\.dart$|_test\.dart$' || true)
+
+    [[ "$FOUND" -eq 0 ]] && info "✅ No obvious manual cubit/bloc construction detected"
+  else
+    info "⚠️ No service_locator.dart / injection.dart found"
+  fi
+
+  h2 "Cubit coupling analysis"
+  if [[ -d "$FEATURES_DIR" ]]; then
+    info "**Cubit/bloc count per feature** (higher counts can indicate coordination complexity, not an automatic issue):"
+    while IFS= read -r feat; do
+      name=$(basename "$feat")
+      count=$(find "$feat" -type f \( -name '*_cubit.dart' -o -name '*_bloc.dart' \) 2>/dev/null | wc -l | tr -d ' ')
+      if [[ "$count" -gt 4 ]]; then
+        info "- ⚠️ **$name**: $count (review for possible micro-splits or duplicated coordination)"
+      else
+        info "- $name: $count"
+      fi
+    done < <(feature_dirs)
+  fi
+
+  info ""
+  info "**Stored cubit/bloc dependencies** (should usually be 0):"
+  FOUND=0
+  while IFS= read -r f; do
+    matches=$(grep -nE 'final .*Cubit\b|final .*Bloc\b' "$f" 2>/dev/null || true)
     if [[ -n "$matches" ]]; then
-      info "- ⚠️  \`${f#$PROJECT_DIR/}\`:"
+      info "- ⚠️ \`$(relpath "$f")\`"
       while IFS= read -r line; do
         info "  \`$line\`"
       done <<< "$matches"
       FOUND=1
     fi
-  fi
-done < <(dart_files)
-[[ "$FOUND" -eq 0 ]] && info "✅ None detected"
+  done < <(dart_files | grep -E '(_cubit|_bloc)\.dart$' || true)
+  [[ "$FOUND" -eq 0 ]] && info "✅ None detected"
 
-# ── 9. Routing ───────────────────────────────────────────────
-h2 "Routing"
-ROUTER_FILE=$(dart_files | grep -E 'app_router\.dart|router\.dart' | head -1 || true)
-if [[ -n "$ROUTER_FILE" ]]; then
-  rel="${ROUTER_FILE#$PROJECT_DIR/}"
-  ROUTE_COUNT=$(grep -c 'path:' "$ROUTER_FILE" 2>/dev/null || echo 0)
-  PATHS=$(grep "path:" "$ROUTER_FILE" 2>/dev/null | sed "s/^[[:space:]]*//" | tr '\n' ' ' || true)
-  info "✅ \`$rel\` — $ROUTE_COUNT route(s)"
-  info "$PATHS"
-  STRAY_ROUTER=$(dart_files | grep -v "core/router" \
-    | xargs grep -l "GoRouter(" 2>/dev/null || true)
-  [[ -n "$STRAY_ROUTER" ]] && info "⚠️ GoRouter defined outside core/router:" \
-    && while IFS= read -r f; do info "- \`${f#$PROJECT_DIR/}\`"; done <<< "$STRAY_ROUTER"
-else
-  info "❌ No router file found"
-fi
+  h2 "Routing"
+  ROUTER_FILE=$(dart_files | grep -E '/(app_router|router)\.dart$' | head -1 || true)
+  if [[ -n "$ROUTER_FILE" ]]; then
+    rel="$(relpath "$ROUTER_FILE")"
+    ROUTE_COUNT=$(grep -c 'path:' "$ROUTER_FILE" 2>/dev/null || echo 0)
+    info "✅ \`$rel\` - $ROUTE_COUNT route(s)"
 
-# ── 10. Test coverage ─────────────────────────────────────────
-h2 "Test coverage"
-TEST_DIR="$PROJECT_DIR/test"
-if [[ -d "$TEST_DIR" ]]; then
-  TOTAL=$(find "$TEST_DIR" -name "*_test.dart" | wc -l | tr -d ' ')
-  BLOC=$(find "$TEST_DIR" \( -name "*cubit*_test.dart" -o -name "*bloc*_test.dart" \) | wc -l | tr -d ' ')
-  WIDGET=$(find "$TEST_DIR" \( -name "*widget*_test.dart" -o -name "*screen*_test.dart" \) | wc -l | tr -d ' ')
-  REPO=$(find "$TEST_DIR" \( -name "*repo*_test.dart" -o -name "*repository*_test.dart" \) | wc -l | tr -d ' ')
-  info "Total: $TOTAL  |  BLoC/Cubit: $BLOC  |  Widget/Screen: $WIDGET  |  Repo: $REPO"
-  if [[ -d "$FEATURES_DIR" ]]; then
-    info ""
-    while IFS= read -r feat; do
-      FEAT_NAME=$(basename "$feat")
-      COUNT=$(find "$TEST_DIR" -name "*${FEAT_NAME}*" 2>/dev/null | wc -l | tr -d ' ')
-      [[ "$COUNT" -eq 0 ]] && info "- ❌ $FEAT_NAME (no tests)" \
-                           || info "- ✅ $FEAT_NAME ($COUNT file(s))"
-    done < <(find "$FEATURES_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
+    VALUE_COUNT=$(count_pattern_matches 'BlocProvider\.value')
+    PUSH_COUNT=$(count_pattern_matches 'Navigator\.push')
+    DIALOG_COUNT=$(count_pattern_matches 'showDialog|showModalBottomSheet')
+    info "Provider boundary signals: BlocProvider.value=$VALUE_COUNT | Navigator.push=$PUSH_COUNT | dialogs/sheets=$DIALOG_COUNT"
+  else
+    info "⚠️ No router file found"
   fi
-else
-  info "❌ No \`test/\` directory found"
-fi
+
+  h2 "Test coverage"
+  TEST_DIR="$PROJECT_DIR/test"
+  if [[ -d "$TEST_DIR" ]]; then
+    TOTAL=$(find "$TEST_DIR" -name '*_test.dart' | wc -l | tr -d ' ')
+    BLOC=$(find "$TEST_DIR" \( -name '*cubit*_test.dart' -o -name '*bloc*_test.dart' \) | wc -l | tr -d ' ')
+    WIDGET=$(find "$TEST_DIR" \( -name '*widget*_test.dart' -o -name '*screen*_test.dart' \) | wc -l | tr -d ' ')
+    REPO=$(find "$TEST_DIR" \( -name '*repo*_test.dart' -o -name '*repository*_test.dart' \) | wc -l | tr -d ' ')
+    info "Total: $TOTAL | Cubit/BLoC: $BLOC | Widget/Screen: $WIDGET | Repo: $REPO"
+
+    if [[ -d "$FEATURES_DIR" ]]; then
+      info ""
+      while IFS= read -r feat; do
+        FEAT_NAME=$(basename "$feat")
+        COUNT=$(find "$TEST_DIR" \( -path "*features/$FEAT_NAME/*" -o -name "*${FEAT_NAME}*_test.dart" \) 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$COUNT" -eq 0 ]]; then
+          info "- ⚠️ $FEAT_NAME (no obvious feature tests)"
+        else
+          info "- ✅ $FEAT_NAME ($COUNT file(s))"
+        fi
+      done < <(feature_dirs)
+    fi
+  else
+    info "⚠️ No \`test/\` directory found"
+  fi
 
 } > "$OUT_FILE"
 

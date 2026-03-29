@@ -6,7 +6,9 @@
 ```dart
 // Forms, auth, CRUD - just call methods
 class AuthCubit extends Cubit<AuthState> {
-  final AuthRepository _repo;
+  AuthCubit(this._repo) : super(const AuthState.initial());
+
+  final IAuthRepository _repo;
 
   Future<void> login(String email, String password) async {
     emit(const AuthState.loading());
@@ -19,9 +21,9 @@ class AuthCubit extends Cubit<AuthState> {
 }
 ```
 
-### When to use BLoC (event transformers needed)
+### When to use BLoC (explicit events or concurrency)
 ```dart
-// Search-as-you-type - needs debounce
+// Search-as-you-type - needs debounce + cancellation semantics
 class SearchBloc extends Bloc<SearchEvent, SearchState> {
   SearchBloc(this._repo) : super(const SearchState.initial()) {
     on<QueryChanged>(
@@ -32,7 +34,12 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
     );
   }
 
-  Future<void> _onQueryChanged(QueryChanged event, Emitter emit) async {
+  final ISearchRepository _repo;
+
+  Future<void> _onQueryChanged(
+    QueryChanged event,
+    Emitter<SearchState> emit,
+  ) async {
     emit(const SearchState.loading());
     final result = await _repo.search(event.query);
     result.fold(
@@ -66,7 +73,7 @@ state.when(
 ## MultiBlocListener Pattern
 
 ```dart
-// ✅ CORRECT - flat, readable
+// CORRECT - flat, readable
 MultiBlocListener(
   listeners: [
     BlocListener<AuthCubit, AuthState>(
@@ -94,22 +101,37 @@ MultiBlocListener(
 ## Dependency Injection
 
 ```dart
-// lib/core/di/injection.dart
+// lib/core/di/service_locator.dart
 final getIt = GetIt.instance;
 
-void configureDependencies() {
-  // Data layer - singletons
+Future<void> configureDependencies() async {
+  // Data layer
   getIt.registerLazySingleton<AuthApi>(() => AuthApi());
   getIt.registerLazySingleton<IAuthRepository>(
-    () => AuthRepository(getIt<AuthApi>()),
+    () => AuthRepositoryImpl(getIt<AuthApi>()),
   );
 
-  // Presentation layer - factories (new instance each time)
-  getIt.registerFactory(() => AuthCubit(getIt<IAuthRepository>()));
-}
+  // Presentation layer
+  getIt.registerFactory<AuthCubit>(
+    () => AuthCubit(getIt<IAuthRepository>()),
+  );
 
-// In screen
-BlocProvider(create: (_) => getIt<AuthCubit>())
+  // Route-scoped cubit with runtime parameter
+  getIt.registerFactoryParam<ProfileCubit, String, void>(
+    (userId, _) => ProfileCubit(
+      userId: userId,
+      repo: getIt<IProfileRepository>(),
+    ),
+  );
+}
+```
+
+```dart
+// In a route builder or screen composition root
+BlocProvider(
+  create: (_) => getIt<AuthCubit>(),
+  child: const LoginScreen(),
+)
 ```
 
 ## Routing with go_router
@@ -121,13 +143,18 @@ final router = GoRouter(
     GoRoute(path: '/', builder: (_, __) => const HomeScreen()),
     GoRoute(
       path: '/profile/:id',
-      builder: (_, state) => ProfileScreen(
-        id: state.pathParameters['id']!,
-      ),
+      builder: (_, state) {
+        final userId = state.pathParameters['id']!;
+        return BlocProvider(
+          create: (_) => getIt<ProfileCubit>(param1: userId)..load(),
+          child: const ProfileScreen(),
+        );
+      },
     ),
   ],
-  redirect: (context, state) {
-    final isAuthed = getIt<AuthCubit>().state is _Authenticated;
+  redirect: (_, state) {
+    final session = getIt<SessionService>();
+    final isAuthed = session.currentUser != null;
     if (!isAuthed && state.uri.path != '/login') return '/login';
     return null;
   },
@@ -145,19 +172,185 @@ abstract class IAuthRepository {
 }
 
 // Implementation (data layer)
-class AuthRepository implements IAuthRepository {
+class AuthRepositoryImpl implements IAuthRepository {
+  AuthRepositoryImpl(this._api);
+
   final AuthApi _api;
 
   @override
   Future<Either<Failure, User>> login(String email, String password) async {
     try {
       final userDto = await _api.login(email: email, password: password);
-      return Right(User.fromDto(userDto));
+      return Right(userDto.toDomain());
     } on ApiException catch (e) {
       return Left(Failure(e.message));
-    } catch (e) {
-      return Left(const Failure('Unexpected error')));
+    } catch (_) {
+      return Left(const Failure('Unexpected error'));
     }
   }
+}
+```
+
+## Common Anti-Pattern Corrections
+
+### Provide the cubit above the consumer
+```dart
+// WRONG - same build context tries to consume immediately
+class MyScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => getIt<MyCubit>(),
+      child: Text(context.watch<MyCubit>().state.toString()),
+    );
+  }
+}
+
+// CORRECT - provide at the route boundary
+GoRoute(
+  path: '/myscreen',
+  builder: (_, __) => BlocProvider(
+    create: (_) => getIt<MyCubit>(),
+    child: const MyScreen(),
+  ),
+)
+```
+
+### Keep `BlocBuilder` narrow
+```dart
+// WRONG - entire screen rebuilds
+BlocBuilder<ChatsCubit, ChatsState>(
+  builder: (context, state) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Home')),
+      body: Column(
+        children: [
+          HeavyStaticWidget(),
+          ChatsList(chats: state.chats),
+        ],
+      ),
+    );
+  },
+)
+
+// CORRECT - only the dependent widget rebuilds
+Scaffold(
+  appBar: AppBar(title: const Text('Home')),
+  body: Column(
+    children: [
+      const HeavyStaticWidget(),
+      BlocBuilder<ChatsCubit, ChatsState>(
+        builder: (context, state) => ChatsList(chats: state.chats),
+      ),
+    ],
+  ),
+)
+```
+
+### Extract focused widgets instead of helper methods when the piece has a clear standalone role
+```dart
+// OK for tiny local structure, but not a separate concept yet
+class MyScreen extends StatelessWidget {
+  Widget _buildHeader() => const Text('Header');
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [_buildHeader()]);
+  }
+}
+
+// BETTER when the extracted piece has its own clear responsibility
+class MyScreen extends StatelessWidget {
+  const MyScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(children: [Header()]);
+  }
+}
+
+class Header extends StatelessWidget {
+  const Header({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Text('Header');
+}
+```
+
+### Capture `context.read()` before `await`
+```dart
+// WRONG
+Future<void> _doSomething() async {
+  await someAsyncOperation();
+  context.read<MyCubit>().doThing();
+}
+
+// CORRECT
+Future<void> _doSomething() async {
+  final cubit = context.read<MyCubit>();
+  await someAsyncOperation();
+  cubit.doThing();
+}
+```
+
+### Presentation talks to state, not data
+```dart
+// WRONG
+import '../../data/auth_api.dart';
+
+// CORRECT
+import '../bloc/auth_cubit.dart';
+```
+
+### Business logic stays out of widgets
+```dart
+// WRONG - business logic in widget
+class LoginScreen extends StatelessWidget {
+  Future<void> _login(String email, String password) async {
+    final response = await http.post(...);
+  }
+}
+
+// CORRECT - delegate to cubit
+class LoginScreen extends StatelessWidget {
+  const LoginScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return LoginForm(
+      onLogin: (email, password) {
+        context.read<AuthCubit>().login(email, password);
+      },
+    );
+  }
+}
+```
+
+### Cross-feature access uses contracts, not internals
+```dart
+// WRONG - feature importing another feature's internals
+import '../../../chat/data/chat_api.dart';
+
+// CORRECT - depend on a shared contract or shared module
+import '../../../shared/messaging/domain/chat_gateway.dart';
+```
+
+## Minimum Architecture Tests
+
+```dart
+void main() {
+  test('AuthRepositoryImpl maps ApiException to Failure', () async {
+    // Arrange / Act / Assert
+  });
+
+  blocTest<AuthCubit, AuthState>(
+    'emits loading then authenticated on successful login',
+    build: () => AuthCubit(mockRepo),
+    act: (cubit) => cubit.login('a@b.com', 'secret'),
+    expect: () => [
+      const AuthState.loading(),
+      AuthState.authenticated(testUser),
+    ],
+  );
 }
 ```

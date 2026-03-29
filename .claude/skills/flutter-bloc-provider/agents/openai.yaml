@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flutter Bloc Provider"
+  short_description: "Fix Flutter Provider and Bloc scoping errors"
+  default_prompt: "Diagnose and fix Flutter BlocProvider or Provider scope errors across routes, dialogs, and async code."

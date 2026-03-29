@@ -6,20 +6,40 @@ A modern Flutter application built with Clean Architecture.
 
 This project follows a **Feature-based Clean Architecture** pattern:
 
-- **Data Layer**: DTOs, Repository implementations, and Data Sources.
-- **Domain Layer**: Models, Repository interfaces, and Services (Business Logic).
+- **Data Layer**: DTOs, Data Sources, and Repository implementations.
+- **Domain Layer**: Models, Repository interfaces, and Domain Services (Business Logic).
 - **Presentation Layer**: Cubits (State Management), Screens, and Widgets.
+
+Dependencies flow inward only: `presentation → domain ← data`.
 
 ## Project Structure
 
 ```text
 lib/
-├── core/                  # Global utilities, DI, Router, Theme, L10n
+├── main.dart              # runApp() only — no wiring, no logic
+├── app.dart               # MaterialApp.router + app-scoped providers
+├── core/
+│   ├── di/
+│   │   └── service_locator.dart   # All DI wiring
+│   ├── router/
+│   │   ├── app_router.dart
+│   │   └── route_constants.dart
+│   ├── models/            # Shared domain models only (freezed)
+│   └── utils/
 └── features/
-    └── [feature_name]/    # Encapsulated feature logic
+    └── [feature_name]/
         ├── data/
+        │   ├── datasources/       # Local/remote data sources
+        │   ├── models/            # DTOs (data transfer objects)
+        │   └── repositories/      # Repository implementations
         ├── domain/
+        │   ├── models/            # Feature models (freezed)
+        │   ├── repositories/      # Repository interfaces
+        │   └── services/          # Domain coordination logic
         └── presentation/
+            ├── bloc/               # Cubits + states
+            ├── screens/
+            └── widgets/
 ```
 
 ## CLI Tools

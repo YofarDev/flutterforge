@@ -77,7 +77,7 @@ These scripts are automatically copied to your project's `./scripts` folder:
 
 The `.claude/` folder contains skills that help AI assistants work with your Flutter code:
 
-- **flutter-architecture** - Enforces clean architecture, proper DI, file size limits.
+- **flutter-architecture** - Enforces clean architecture, proper DI, file cohesion.
 - **flutter-testing** - Unit/widget test patterns with mocktail.
 - **flutter-audit** - Analyzes codebase for architecture violations.
 - **flutter-bloc-provider** - Fixes provider errors, dialog/sheet patterns.
@@ -107,11 +107,13 @@ lib/
 └── features/
     └── [feature]/
         ├── data/
-        │   └── repositories/       # Repository implementations
+        │   ├── datasources/       # Local/remote data sources
+        │   ├── models/            # DTOs (data transfer objects)
+        │   └── repositories/      # Repository implementations
         ├── domain/
-        │   ├── models/             # Feature models (freezed)
-        │   ├── repositories/       # Repository interfaces
-        │   └── services/           # Domain logic
+        │   ├── models/            # Feature models (freezed)
+        │   ├── repositories/      # Repository interfaces
+        │   └── services/          # Domain coordination logic
         └── presentation/
             ├── bloc/               # Cubits + states
             ├── screens/

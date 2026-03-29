@@ -26,7 +26,7 @@ Document baseline behavior WITHOUT the skill to prove it addresses real problems
 
 **Expected baseline failures:**
 - May provide cubit in each route (duplication)
-- May not recommend providing at app level in main.dart
+- May not recommend providing app-wide cubits in the app composition root such as `app.dart`
 - May not distinguish between app-wide and route-scoped cubits
 - May create state synchronization issues
 
