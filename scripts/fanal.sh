@@ -8,7 +8,7 @@
 #   ./fanal.sh                     # defaults to current dir
 #
 # Output:
-#   <project>/flutter_analysis_<timestamp>.md
+#   <project>/flutter_analysis.md (overwritten each run — no litter)
 # ============================================================
 
 set -euo pipefail
@@ -17,8 +17,7 @@ PROJECT_DIR="${1:-.}"
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 LIB_DIR="$PROJECT_DIR/lib"
 FEATURES_DIR="$LIB_DIR/features"
-TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUT_FILE="$PROJECT_DIR/flutter_analysis_${TIMESTAMP}.md"
+OUT_FILE="$PROJECT_DIR/flutter_analysis.md"
 
 h2() {
   echo ""
@@ -279,7 +278,7 @@ scan_lines() {
   h2 "Heuristic signals"
   info "_These are grep-based leads. Inspect surrounding code before turning them into audit findings._"
 
-  scan_files "Direct color usage to inspect" "Colors\\.|Color\\(0x" "app_colors\\.dart|app_theme\\.dart|studio_theme\\.dart|app_text_theme\\.dart"
+  scan_files "Direct color usage to inspect" "Colors\\.|Color\\(0x" "_colors\\.dart|_theme\\.dart"
   scan_files "print / debugPrint to inspect" "print\\(|debugPrint\\(" "logger\\.dart"
   scan_lines "GoRouter navigation calls to inspect" "context\\.go\\(|context\\.push\\(|GoRouter\\.of\\(context\\)\\.(go|push)" 5
   scan_lines "Widget helper methods to inspect" "Widget _build" 3
@@ -316,15 +315,11 @@ scan_lines() {
 
   h2 "Cubit coupling analysis"
   if [[ -d "$FEATURES_DIR" ]]; then
-    info "**Cubit/bloc count per feature** (higher counts can indicate coordination complexity, not an automatic issue):"
+    info "**Cubit/bloc count per feature** (raw counts only — judge boundaries by cohesion, not by number):"
     while IFS= read -r feat; do
       name=$(basename "$feat")
       count=$(find "$feat" -type f \( -name '*_cubit.dart' -o -name '*_bloc.dart' \) 2>/dev/null | wc -l | tr -d ' ')
-      if [[ "$count" -gt 4 ]]; then
-        info "- ⚠️ **$name**: $count (review for possible micro-splits or duplicated coordination)"
-      else
-        info "- $name: $count"
-      fi
+      info "- $name: $count"
     done < <(feature_dirs)
   fi
 

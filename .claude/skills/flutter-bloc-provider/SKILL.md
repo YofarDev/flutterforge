@@ -137,30 +137,9 @@ Future<void> _doSomething() async {
 
 ## Quick Patterns
 
-**App-wide (`app.dart`):**
-```dart
-MultiBlocProvider(
-  providers: [
-    BlocProvider(create: (_) => getIt<AuthCubit>()),
-    BlocProvider(create: (_) => getIt<ThemeCubit>()),
-  ],
-  child: MaterialApp.router(...),
-)
-```
-
-**Route-scoped (`GoRoute`):**
-```dart
-GoRoute(
-  path: '/profile/:id',
-  builder: (_, state) {
-    final userId = state.pathParameters['id']!;
-    return BlocProvider(
-      create: (_) => getIt<ProfileCubit>(param1: userId)..load(),
-      child: const ProfileScreen(),
-    );
-  },
-)
-```
+App-wide and route-scoped (`GoRoute`) provider patterns are covered in
+`flutter-architecture` — the patterns below are the ones specific to pushing
+new boundaries.
 
 **Navigator.push (new instance):**
 ```dart

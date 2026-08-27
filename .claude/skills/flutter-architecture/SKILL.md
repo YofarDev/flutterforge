@@ -380,11 +380,12 @@ Signs a file does **not** need splitting:
 
 1. **New feature folder or extension of existing?** — decide before writing any code
 2. **Design the freezed state first** — what does the UI actually need?
-3. **Define the repository interface before the implementation**
-4. **Does the new cubit need to react to another cubit?** — if yes, extract a domain service instead
-5. **Register dependencies in `service_locator.dart`** — keep registration and lifetimes in one place
-6. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope
-7. **Add architecture tests** — repository mapping/failure tests, cubit/bloc state tests, and a DI smoke test for new registrations
+3. **Run codegen after adding freezed classes** — `dart run build_runner build --delete-conflicting-outputs`; without it the `_$` part files don't exist and nothing compiles. Use `watch` during iterative work.
+4. **Define the repository interface before the implementation**
+5. **Does the new cubit need to react to another cubit?** — if yes, extract a domain service instead
+6. **Register dependencies in `service_locator.dart`** — keep registration and lifetimes in one place
+7. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope
+8. **Add architecture tests** — repository mapping/failure tests, cubit/bloc state tests, and a DI smoke test for new registrations
 
 ## Minimum Architecture Tests
 

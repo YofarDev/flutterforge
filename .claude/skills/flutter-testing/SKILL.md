@@ -1,6 +1,6 @@
 ---
 name: "flutter-testing"
-description: "Use when writing tests for Flutter projects, including unit tests, widget tests, bloc tests, or when the user asks how to test specific components (cubits, repositories, screens, domain services, agent tools). Triggers include: 'write tests for this', 'add unit tests', 'test my cubit', 'test my repository', 'write widget tests', 'improve test coverage', 'write a bloc_test', 'mock this dependency', 'add golden tests', 'how do I test X in Flutter', 'how should I test navigation', 'how do I test a freezed state', 'should I use mockito or mocktail', 'test my agent tool', 'test my domain service'. Always use alongside flutter-architecture when writing tests for existing features."
+description: "Use when writing tests for Flutter projects, including unit tests, widget tests, bloc tests, or when the user asks how to test specific components (cubits, repositories, screens, domain services). Triggers include: 'write tests for this', 'add unit tests', 'test my cubit', 'test my repository', 'write widget tests', 'improve test coverage', 'write a bloc_test', 'mock this dependency', 'add golden tests', 'how do I test X in Flutter', 'how should I test navigation', 'how do I test a freezed state', 'should I use mockito or mocktail', 'test my domain service'. Always use alongside flutter-architecture when writing tests for existing features."
 ---
 
 # Flutter Testing
@@ -12,7 +12,6 @@ description: "Use when writing tests for Flutter projects, including unit tests,
 | Cubits/BLoCs | `bloc_test` | Public methods, state order, error paths |
 | Repositories | `mocktail` | Parameter forwarding, DTO mapping, failure translation |
 | Domain services | `flutter_test` + `mocktail` | Coordination logic, edge cases, no cubit deps |
-| Agent tools | `flutter_test` + `mocktail` | Schema, `execute()`, error paths |
 | Widgets | `flutter_test` | UI branches, interactions, provider wiring |
 | Screens | `flutter_test` | Integration with fake or mock cubits |
 
@@ -20,19 +19,15 @@ description: "Use when writing tests for Flutter projects, including unit tests,
 
 ## Setup
 
-Add `bloc_test` and `mocktail` when they are not already present. Add `golden_toolkit` only when the project uses golden tests. Match the repository existing version constraints instead of introducing pinned versions from this skill.
+Add `bloc_test` and `mocktail` when they are not already present. Golden tests use the built-in `matchesGoldenFile` matcher — no extra package needed. Match the repository's existing version constraints instead of introducing pinned versions from this skill.
 
 ## Test Structure (Mirrors `lib/`)
 
 ```text
 test/
 ├── core/
-│   ├── agent/
-│   │   └── tools/
-│   │       ├── weather_tool_test.dart
-│   │       └── search_tool_test.dart
 │   └── services/
-│       └── talking_coordinator_service_test.dart
+│       └── session_service_test.dart
 └── features/
     └── auth/
         ├── data/auth_repository_test.dart
@@ -68,22 +63,17 @@ When a cubit delegates to a domain service, verify the delegation here and test 
 internal coordination in its own test file.
 
 ```dart
-class MockTalkingCoordinatorService extends Mock
-    implements TalkingCoordinatorService {}
+class MockSessionService extends Mock implements SessionService {}
 
-blocTest<ChatTtsCubit, ChatTtsState>(
-  'notifies coordinator when TTS starts',
+blocTest<AuthCubit, AuthState>(
+  'notifies session service on login',
   build: () {
-    mockCoordinator = MockTalkingCoordinatorService();
-    when(() => mockCoordinator.onTtsStarted()).thenReturn(null);
-    return ChatTtsCubit(
-      ttsQueueManager: mockTtsQueueManager,
-      coordinator: mockCoordinator,
-    );
+    when(() => mockSession.onUserLoggedIn(any())).thenReturn(null);
+    return AuthCubit(repo: mockRepo, session: mockSession);
   },
-  act: (c) => c.startTts('Hello'),
+  act: (c) => c.login('user@ex.com', 'pass'),
   verify: (_) {
-    verify(() => mockCoordinator.onTtsStarted()).called(1);
+    verify(() => mockSession.onUserLoggedIn(any())).called(1);
   },
 );
 ```
@@ -137,75 +127,28 @@ no widgets, no providers, no `blocTest` unless the service itself is a bloc.
 
 ```dart
 void main() {
-  late TalkingCoordinatorService service;
+  late SessionService service;
 
-  setUp(() => service = TalkingCoordinatorService());
+  setUp(() => service = SessionService());
 
-  group('TalkingCoordinatorService', () {
-    test('marks talking as active when TTS starts', () {
-      service.onTtsStarted();
-      expect(service.isTalking, true);
+  group('SessionService', () {
+    test('marks user as logged in', () {
+      service.onUserLoggedIn(testUser);
+      expect(service.currentUser, testUser);
     });
 
-    test('marks talking as inactive when TTS stops', () {
-      service.onTtsStarted();
-      service.onTtsStopped();
-      expect(service.isTalking, false);
+    test('clears user on logout', () {
+      service.onUserLoggedIn(testUser);
+      service.onUserLoggedOut();
+      expect(service.currentUser, isNull);
     });
 
-    test('onTtsStopped is idempotent when not talking', () {
-      expect(() => service.onTtsStopped(), returnsNormally);
-    });
-  });
-}
-```
-
-## Agent Tool Test
-
-Every `AgentTool` implementation gets its own test file. Always cover schema, happy path,
-and error handling.
-
-```dart
-class MockWeatherService extends Mock implements WeatherService {}
-
-void main() {
-  late WeatherTool tool;
-  late MockWeatherService mockService;
-
-  setUp(() {
-    mockService = MockWeatherService();
-    tool = WeatherTool(service: mockService);
-  });
-
-  group('WeatherTool', () {
-    test('schema declares location as required', () {
-      final required = tool.schema['required'] as List;
-      expect(required, contains('location'));
-    });
-
-    test('execute returns weather data for valid location', () async {
-      when(() => mockService.getCurrent('Paris'))
-          .thenAnswer((_) async => fakeWeatherData);
-
-      final result = await tool.execute({'location': 'Paris'});
-
-      expect(result, isA<AgentResultText>());
-      verify(() => mockService.getCurrent('Paris')).called(1);
-    });
-
-    test('execute returns error result when service fails', () async {
-      when(() => mockService.getCurrent(any()))
-          .thenThrow(Exception('API unavailable'));
-
-      final result = await tool.execute({'location': 'Paris'});
-
-      expect(result, isA<AgentResultError>());
+    test('logout is idempotent when already logged out', () {
+      expect(() => service.onUserLoggedOut(), returnsNormally);
     });
   });
 }
 ```
-
-**Rule:** Agent tool `execute()` must never throw. Return `AgentResultError` instead.
 
 ## Widget Test
 
@@ -241,17 +184,24 @@ testWidgets('shows error on failure', (tester) async {
 
 ## Golden Test
 
+Uses the built-in `matchesGoldenFile` matcher — no extra package needed.
+
 ```dart
 testGoldens('renders correctly', (tester) async {
-  await tester.pumpWidgetBuilder(
+  await tester.binding.setSurfaceSize(const Size(390, 844));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+
+  await tester.pumpWidget(
     BlocProvider.value(
       value: mockCubit,
-      child: const LoginScreen(),
+      child: const MaterialApp(home: LoginScreen()),
     ),
-    surfaceSize: const Size(390, 844),
   );
 
-  await screenMatchesGolden(tester, 'login');
+  await expectLater(
+    find.byType(LoginScreen),
+    matchesGoldenFile('goldens/login_screen.png'),
+  );
 });
 ```
 
@@ -280,11 +230,6 @@ testGoldens('renders correctly', (tester) async {
 - [ ] User interactions
 - [ ] Provider wiring for the expected subtree
 
-**Agent tool:**
-- [ ] Schema has required fields
-- [ ] Happy path returns correct result type
-- [ ] Error path returns `AgentResultError`
-
 ## Anti-Patterns
 
 | ❌ Wrong | ✅ Fix |
@@ -298,7 +243,6 @@ testGoldens('renders correctly', (tester) async {
 | Use `mockito` by default | Prefer `mocktail` to avoid generation unless the project already standardizes on something else |
 | Assert on another cubit's state in a cubit test | Test each cubit in isolation |
 | Call `emit()` directly from the test body | Use `whenListen`, `MockCubit`, or a fake helper like `pushState()` |
-| Agent tool `execute()` throws | Return `AgentResultError` instead |
 
 ## See Also
 - `mocktail-cheatsheet.md` — Reference snippets and complete examples
