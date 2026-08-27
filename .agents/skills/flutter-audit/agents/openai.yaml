@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flutter Audit"
+  short_description: "Audit Flutter codebases and plan safe migrations"
+  default_prompt: "Run a structured Flutter architecture audit and produce prioritized findings with an incremental migration plan."

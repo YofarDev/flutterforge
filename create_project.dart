@@ -3,8 +3,12 @@ import 'dart:io';
 
 void main(List<String> args) async {
   if (args.isEmpty || args.any((arg) => arg == '--help' || arg == '-h')) {
-    print('Usage: dart create_project.dart [--org=<organization>] [flutter_create_args] <project_name>');
-    print('Example: dart create_project.dart --org=com.mycompany --platforms=android,ios my_new_app');
+    print(
+      'Usage: dart create_project.dart [--org=<organization>] [flutter_create_args] <project_name>',
+    );
+    print(
+      'Example: dart create_project.dart --org=com.mycompany --platforms=android,ios my_new_app',
+    );
     return;
   }
 
@@ -62,10 +66,17 @@ void main(List<String> args) async {
   final scriptsDest = Directory('scripts');
   if (!scriptsDest.existsSync()) scriptsDest.createSync();
   _copyDirectory(Directory('${scriptDir.path}/scripts'), scriptsDest);
-  
+
   // chmod +x scripts/*.sh on Unix-like systems
   if (!Platform.isWindows) {
-    await _runCommand('chmod', ['+x', ...Directory('scripts').listSync().whereType<File>().map((e) => e.path).where((path) => path.endsWith('.sh'))]);
+    await _runCommand('chmod', [
+      '+x',
+      ...Directory('scripts')
+          .listSync()
+          .whereType<File>()
+          .map((e) => e.path)
+          .where((path) => path.endsWith('.sh')),
+    ]);
   }
 
   // 6. Copy .claude folder
@@ -75,27 +86,62 @@ void main(List<String> args) async {
     _copyDirectory(claudeSource, Directory('.claude'));
   }
 
-  // 7. Copy analysis_options.yaml
-  print('⚙️  Copying \'analysis_options.yaml\'...');
-  File('${scriptDir.path}/analysis_options.yaml').copySync('analysis_options.yaml');
+  // 7. Copy .codex folder
+  final codexSource = Directory('${scriptDir.path}/.codex');
+  if (codexSource.existsSync()) {
+    print('🤖 Copying \'.codex\' folder...');
+    _copyDirectory(codexSource, Directory('.codex'));
+  }
 
-  // 8. Copy l10n.yaml
+  // 8. Copy .agents folder
+  final agentsSource = Directory('${scriptDir.path}/.agents');
+  if (agentsSource.existsSync()) {
+    print('🤖 Copying \'.agents\' folder...');
+    _copyDirectory(agentsSource, Directory('.agents'));
+  }
+
+  // 9. Copy AGENTS.md
+  final agentsInstructionsSource = File('${scriptDir.path}/AGENTS.md');
+  if (agentsInstructionsSource.existsSync()) {
+    print('🤖 Copying \'AGENTS.md\'...');
+    agentsInstructionsSource.copySync('AGENTS.md');
+  }
+
+  // 10. Copy remove_counter.sh
+  final removeCounterSource = File('${scriptDir.path}/remove_counter.sh');
+  if (removeCounterSource.existsSync()) {
+    print('🧹 Copying \'remove_counter.sh\'...');
+    removeCounterSource.copySync('remove_counter.sh');
+    if (!Platform.isWindows) {
+      await _runCommand('chmod', ['+x', 'remove_counter.sh']);
+    }
+  }
+
+  // 11. Copy analysis_options.yaml
+  print('⚙️  Copying \'analysis_options.yaml\'...');
+  File(
+    '${scriptDir.path}/analysis_options.yaml',
+  ).copySync('analysis_options.yaml');
+
+  // 12. Copy l10n.yaml
   final l10nSource = File('${scriptDir.path}/l10n.yaml');
   if (l10nSource.existsSync()) {
     print('🌐 Copying \'l10n.yaml\'...');
     l10nSource.copySync('l10n.yaml');
   }
 
-  // 9. Copy .gitignore template
+  // 13. Copy .gitignore template
   final gitignoreTemplate = File('${scriptDir.path}/template-gitignore');
   if (gitignoreTemplate.existsSync()) {
     print('📋 Updating \'.gitignore\'...');
     final gitignoreFile = File('.gitignore');
     final content = gitignoreFile.readAsStringSync();
-    gitignoreFile.writeAsStringSync('$content\n${gitignoreTemplate.readAsStringSync()}');
+    gitignoreFile.writeAsStringSync(
+      '$content\n${gitignoreTemplate.readAsStringSync()}',
+    );
   }
 
-  // 10. Copy Inter font files
+  // 14. Copy Inter font files
   final fontSource = Directory('${scriptDir.path}/fonts');
   if (fontSource.existsSync()) {
     print('🔤 Setting up Inter font...');
@@ -104,24 +150,31 @@ void main(List<String> args) async {
     _copyDirectory(fontSource, fontDest);
   }
 
-  // 11. Process pubspec.yaml
+  // 15. Process pubspec.yaml
   print('🧹 Cleaning and configuring pubspec.yaml...');
   final pubspecFile = File('pubspec.yaml');
   var content = pubspecFile.readAsStringSync();
 
   // Remove comments
-  content = content.split('\n')
+  content = content
+      .split('\n')
       .where((line) => !line.trimLeft().startsWith('#'))
       .join('\n');
 
   // Add generate: true under flutter:
   if (!content.contains('generate: true')) {
-    content = content.replaceFirst(RegExp(r'^flutter:', multiLine: true), 'flutter:\n  generate: true');
+    content = content.replaceFirst(
+      RegExp(r'^flutter:', multiLine: true),
+      'flutter:\n  generate: true',
+    );
   }
 
   // Add assets under flutter:
   if (!content.contains('assets:')) {
-    content = content.replaceFirst(RegExp(r'^flutter:', multiLine: true), 'flutter:\n  assets:\n    - assets/');
+    content = content.replaceFirst(
+      RegExp(r'^flutter:', multiLine: true),
+      'flutter:\n  assets:\n    - assets/',
+    );
   }
 
   // Add fonts under flutter:
@@ -137,23 +190,31 @@ void main(List<String> args) async {
           weight: 600
         - asset: assets/fonts/Inter/Inter-Bold.ttf
           weight: 700''';
-    
-    content = content.replaceFirst(RegExp(r'^flutter:', multiLine: true), 'flutter:\n$fontsConfig');
+
+    content = content.replaceFirst(
+      RegExp(r'^flutter:', multiLine: true),
+      'flutter:\n$fontsConfig',
+    );
   }
 
   pubspecFile.writeAsStringSync(content);
 
-  // 12. Add localization packages
+  // 16. Add localization packages
   print('🌐 Adding localization packages...');
-  await _runCommand('flutter', ['pub', 'add', 'flutter_localizations', '--sdk=flutter']);
+  await _runCommand('flutter', [
+    'pub',
+    'add',
+    'flutter_localizations',
+    '--sdk=flutter',
+  ]);
   await _runCommand('flutter', ['pub', 'add', 'intl:any']);
 
-  // 13. Add packages from packages_to_add.json
+  // 17. Add packages from packages_to_add.json
   final packagesFile = File('${scriptDir.path}/packages_to_add.json');
   if (packagesFile.existsSync()) {
     print('📦 Adding packages from packages_to_add.json...');
     final json = jsonDecode(packagesFile.readAsStringSync());
-    
+
     final deps = List<String>.from(json['dependencies'] ?? []);
     if (deps.isNotEmpty) {
       await _runCommand('flutter', ['pub', 'add', ...deps]);
@@ -165,11 +226,11 @@ void main(List<String> args) async {
     }
   }
 
-  // 14. Generate localization files
+  // 18. Generate localization files
   print('🌐 Generating localization files...');
   await _runCommand('flutter', ['gen-l10n']);
 
-  // 15. Setup README.md
+  // 19. Setup README.md
   final readmeTemplate = File('${scriptDir.path}/template-README.md');
   if (readmeTemplate.existsSync()) {
     print('📄 Setting up README.md from template...');
@@ -180,22 +241,31 @@ void main(List<String> args) async {
     print('⚠️  Warning: template-README.md not found. Skipping README setup.');
   }
 
-  // 16. Replace placeholder package name
-  print('✏️  Replacing placeholder package name \'my_flutter_app\' with \'$projectName\'...');
+  // 20. Replace placeholder package name
+  print(
+    '✏️  Replacing placeholder package name \'my_flutter_app\' with \'$projectName\'...',
+  );
   _replaceInFiles(Directory.current, 'my_flutter_app', projectName);
 
-  // 17. Run build_runner
+  // 21. Run build_runner
   print('🔧 Running build_runner for code generation...');
-  await _runCommand('dart', ['run', 'build_runner', 'build', '--delete-conflicting-outputs']);
+  await _runCommand('dart', [
+    'run',
+    'build_runner',
+    'build',
+    '--delete-conflicting-outputs',
+  ]);
 
   print('✅ Project setup complete!');
 
-  // 18. Open in VS Code
+  // 22. Open in VS Code
   print('📝 Opening project in VS Code...');
   try {
     await Process.start('code', ['.'], mode: ProcessStartMode.detached);
   } catch (e) {
-    print('⚠️  Could not open VS Code. Make sure \'code\' command is in your PATH.');
+    print(
+      '⚠️  Could not open VS Code. Make sure \'code\' command is in your PATH.',
+    );
   }
 }
 
@@ -213,10 +283,14 @@ void _copyDirectory(Directory source, Directory destination) {
   if (!destination.existsSync()) destination.createSync(recursive: true);
   for (var entity in source.listSync()) {
     if (entity is Directory) {
-      final newDirectory = Directory('${destination.path}/${entity.path.split(Platform.pathSeparator).last}');
+      final newDirectory = Directory(
+        '${destination.path}/${entity.path.split(Platform.pathSeparator).last}',
+      );
       _copyDirectory(entity, newDirectory);
     } else if (entity is File) {
-      entity.copySync('${destination.path}/${entity.path.split(Platform.pathSeparator).last}');
+      entity.copySync(
+        '${destination.path}/${entity.path.split(Platform.pathSeparator).last}',
+      );
     }
   }
 }

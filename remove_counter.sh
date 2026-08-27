@@ -31,6 +31,7 @@ fi
 if [ -f "lib/core/router/app_router.dart" ]; then
     # Remove import
     sed -i '/import.*counter_screen.dart/d' lib/core/router/app_router.dart
+    sed -i '/import.*counter_cubit.dart/d' lib/core/router/app_router.dart
     # Remove GoRoute block for counter. This is a bit tricky with sed, 
     # but we can look for the specific pattern.
     sed -i '/GoRoute(/{:a;N;/path: Routes.counter/!ba;d}' lib/core/router/app_router.dart 2>/dev/null || true

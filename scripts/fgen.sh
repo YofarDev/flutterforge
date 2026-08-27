@@ -239,12 +239,25 @@ EOF
 cat > lib/features/$FEATURE_SNAKE/presentation/screens/${FEATURE_SNAKE}_screen.dart <<EOF
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/di/service_locator.dart';
 import '../../domain/models/${FEATURE_SNAKE}.dart';
 import '../bloc/${FEATURE_SNAKE}_cubit.dart';
 import '../bloc/${FEATURE_SNAKE}_state.dart';
 
 class ${FEATURE_PASCAL}Screen extends StatelessWidget {
   const ${FEATURE_PASCAL}Screen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider<${FEATURE_PASCAL}Cubit>(
+      create: (_) => getIt<${FEATURE_PASCAL}Cubit>()..loadData(),
+      child: const ${FEATURE_PASCAL}View(),
+    );
+  }
+}
+
+class ${FEATURE_PASCAL}View extends StatelessWidget {
+  const ${FEATURE_PASCAL}View({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -386,5 +399,5 @@ fi
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
 echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}"
-echo -e "2. Add a route in ${GREEN}lib/core/router/app_router.dart${NC}"
+echo -e "2. Add a route in ${GREEN}lib/core/router/app_router.dart${NC} pointing to ${GREEN}const ${FEATURE_PASCAL}Screen()${NC}"
 echo ""

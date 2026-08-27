@@ -17,7 +17,7 @@ Dependencies flow inward only: `presentation → domain ← data`.
 ```text
 lib/
 ├── main.dart              # runApp() only — no wiring, no logic
-├── app.dart               # MaterialApp.router + app-scoped providers
+├── app.dart               # MaterialApp.router configuration
 ├── core/
 │   ├── di/
 │   │   └── service_locator.dart   # All DI wiring

@@ -8,7 +8,7 @@ FlutterForge is a template + toolkit that helps you:
 
 - **Start new Flutter projects** with a solid, feature-based architecture. The goal is to provide a template that you can use as a starting point for your next Flutter project, with solid foundations for working with agents.
 - **Speed up daily development** with utility scripts.
-- **Get AI assistance** with Claude-powered development skills.
+- **Get AI assistance** with shared agent skills for Claude, Codex, and similar tools.
 
 ---
 
@@ -73,9 +73,9 @@ These scripts are automatically copied to your project's `./scripts` folder:
 | `./scripts/fcheck.sh "pattern"`              | Search code in lib/                                   |
 | `./scripts/findstr.sh "pattern"`             | Search code in lib/ + test/                           |
 
-### Claude Skills
+### Agent Skills
 
-The `.claude/` folder contains skills that help AI assistants work with your Flutter code:
+The template copies `.claude/`, `.codex/`, `.agents/`, and `AGENTS.md` so the same conventions are available across agent tools:
 
 - **flutter-architecture** - Enforces clean architecture, proper DI, file cohesion.
 - **flutter-testing** - Unit/widget test patterns with mocktail.
@@ -83,7 +83,7 @@ The `.claude/` folder contains skills that help AI assistants work with your Flu
 - **flutter-bloc-provider** - Fixes provider errors, dialog/sheet patterns.
 - **prepare-context** - Exports project files as `.txt` into a flat folder (`context-export/`) for external AI tools.
 
-These skills are automatically loaded when using Claude Code.
+These instructions are available immediately in generated projects instead of recreating them by hand.
 
 ---
 
@@ -150,7 +150,7 @@ After running the script, follow the printed instructions to register your new c
 After creating a new project, you can delete the demo features to start fresh with a single command:
 
 ```bash
-.remove_counter.sh
+./remove_counter.sh
 ```
 
 This will automatically:
@@ -168,7 +168,7 @@ This will automatically:
 ```bash
 flutter pub get                    # Install dependencies
 flutter gen-l10n                  # Generate localization
-dart run build_runner build       # Generate freezed models
+dart run build_runner build --delete-conflicting-outputs # Generate freezed models
 flutter analyze                   # Lint code
 flutter test                     # Run tests
 dart format .                    # Format code

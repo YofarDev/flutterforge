@@ -77,7 +77,7 @@ echo ""
 # Bash string processing is too fragile for multi-quote, multi-line dart code.
 # Python handles it cleanly with proper line context.
 
-RESULTS=$(python3 << 'PYEOF'
+RESULTS=$(uv run python << 'PYEOF'
 import re
 import os
 import sys
@@ -208,7 +208,7 @@ export PROJECT_ROOT
 export DART_FILES
 RESULTS=$(DART_FILES="$(printf '%s\n' "${DART_FILES[@]}")" \
   PROJECT_ROOT="$PROJECT_ROOT" \
-  python3 << 'PYEOF'
+  uv run python << 'PYEOF'
 import re
 import os
 

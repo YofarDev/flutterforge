@@ -177,7 +177,7 @@ while IFS= read -r line; do
     TARGET_ABS="${CANDIDATES[0]}"
     IMPORTER_DIR=$(dirname "$IMPORTER_ABS")
 
-    NEW_IMPORT=$(python3 -c "
+    NEW_IMPORT=$(uv run python -c "
 import sys, os
 target, importer_dir = sys.argv[1], sys.argv[2]
 rel = os.path.relpath(target, importer_dir)

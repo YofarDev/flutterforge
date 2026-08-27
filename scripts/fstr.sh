@@ -63,7 +63,7 @@ add_to_arb() {
 
     # Notice the quotes around 'EOF'. This prevents Bash from evaluating variables inside,
     # leaving Python to read them securely from os.environ.
-    python3 - <<'EOF'
+    uv run python - <<'EOF'
 import json
 import os
 import re
