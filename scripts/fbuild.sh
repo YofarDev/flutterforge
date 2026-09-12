@@ -14,11 +14,12 @@
 
 set -e
 
-# Portable in-place sed (BSD vs GNU flag difference)
+# Portable in-place sed (BSD vs GNU flag difference). An array, not a
+# wrapper function — nothing to be undefined at call time.
 if sed --version >/dev/null 2>&1; then
-    sedi() { sed -i "$@"; }
+    SED_INPLACE=(-i)
 else
-    sedi() { sed -i '' "$@"; }
+    SED_INPLACE=(-i '')
 fi
 
 error_exit() {
@@ -57,7 +58,7 @@ NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))
 NEW_VERSION_LINE="version: $VERSION+$NEW_BUILD_NUMBER"
 
 echo "Bumping version: $VERSION+$BUILD_NUMBER -> $VERSION+$NEW_BUILD_NUMBER"
-sedi "s|^version: $VERSION+$BUILD_NUMBER\$|$NEW_VERSION_LINE|" "$PUBSPEC_FILE" \
+sed "${SED_INPLACE[@]}" "s|^version: $VERSION+$BUILD_NUMBER\$|$NEW_VERSION_LINE|" "$PUBSPEC_FILE" \
     || error_exit "Failed to update $PUBSPEC_FILE."
 
 grep -q "^$NEW_VERSION_LINE\$" "$PUBSPEC_FILE" || \
