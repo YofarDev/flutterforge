@@ -1,4 +1,5 @@
 import 'package:fpdart/fpdart.dart';
+
 import '../../../../core/models/failure.dart';
 import '../repositories/home_repository.dart';
 import '../models/home_data.dart';
@@ -12,7 +13,10 @@ class HomeService {
     return _repository.getHomeData();
   }
 
+  /// Returns the trimmed welcome message. An empty result means "no message";
+  /// the presentation layer falls back to a localized default — the domain
+  /// layer does not own UI copy.
   String formatWelcomeMessage(String message) {
-    return message.trim().isEmpty ? 'Welcome!' : message;
+    return message.trim();
   }
 }

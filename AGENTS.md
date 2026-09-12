@@ -25,12 +25,14 @@ Use jcodemunch MCP for:
 - Use the custom `AppLogger()` to print
 - **freezed v3**: Classes with factory constructors now require `sealed` or `abstract` keyword
 - **Radio**: `groupValue` and `onChanged` are deprecated (after v3.32.0) → use a `RadioGroup` ancestor to manage group value instead
-- Run `flutter analyze` once done, fix any errors
+- Run `fverify` before finishing any change (`./scripts/fverify.sh` if the alias is missing) — it runs `flutter analyze` + `flutter test`; fix everything it reports
 - To add a localization string, run `fstr $keyName "$stringFr" "$stringEn"`
-- You can run `fimp`(no arguments) to auto-fix broken internal imports
+- You can run `fl10n` (no arguments) to find hardcoded user-facing strings that still need localizing (review each finding, then add keys with `fstr`)
+- You can run `fimp` (no arguments) to auto-fix broken internal imports
 - You can run `fdead` (no arguments) to find orphaned files
 - You can run `fgen $feature_name` to generate the boilerplate when adding a new feature
-- There is a hook after a .dart edit : it automatically runs `dart fix --apply && dart format .`, so if you import a package without using it, it will be automatically removed.
+- In Claude Code, running `flutter analyze` first applies `dart fix --apply && dart format .` via a user-level PreToolUse hook. In other runtimes, run those two commands yourself before finishing.
+- `test/architecture_test.dart` enforces the layering rules (no cross-feature internals, presentation never imports data, no cubit-to-cubit fields). Keep it green and extend it when a rule is added to the skills.
 - Read skill `flutter-architecture` whenever you add a feature or refactor.
 
 @RTK.md

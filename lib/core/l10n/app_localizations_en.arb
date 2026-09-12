@@ -28,14 +28,6 @@
   "@counterDecrement": {
     "description": "Button label to decrement the counter"
   },
-  "counterReset": "Reset",
-  "@counterReset": {
-    "description": "Button label to reset the counter"
-  },
-  "counterCount": "Count",
-  "@counterCount": {
-    "description": "Label for the counter value"
-  },
   "commonLoading": "Loading...",
   "@commonLoading": {
     "description": "Loading indicator text"
@@ -91,5 +83,11 @@
   "count": "Count",
   "@count": {
     "description": "Label for the counter value"
-  }
+  },
+  "homeSubtitle": "Home Screen",
+  "tryCounterDemo": "Try the Counter Demo",
+  "counterDemoDescription": "A demo feature showing BLoC state management",
+  "errorTitle": "Error",
+  "pageNotFound": "Page not found",
+  "goHome": "Go Home"
 }

@@ -1,4 +1,5 @@
 import 'package:fpdart/fpdart.dart';
+
 import '../../../../core/models/failure.dart';
 import '../../domain/repositories/home_repository.dart';
 import '../../domain/models/home_data.dart';
@@ -15,8 +16,10 @@ class HomeRepository implements IHomeRepository {
     try {
       final HomeDataDto dto = await _remoteDataSource.getHomeData();
       return Right<Failure, HomeData>(dto.toDomain());
-    } catch (e) {
-      return Left<Failure, HomeData>(Failure.serverError(message: e.toString()));
+    } catch (e, st) {
+      return Left<Failure, HomeData>(
+        Failure.fromException(e, stackTrace: st, tag: 'HomeRepository'),
+      );
     }
   }
 }

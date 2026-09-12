@@ -1,6 +1,20 @@
 #!/bin/bash
-# Script to remove the example counter feature from the project
+# =============================================================================
+# Remove the example counter feature from the project.
+#
+# Deletes the feature folders and surgically updates every file that
+# references them (service_locator, router, home screen, app test).
+# Text edits are done in Python — portable across macOS/Linux (no GNU sed
+# incompatibilities).
+#
+# Usage: run from the project root:  ./remove_counter.sh
+# =============================================================================
 set -e
+
+if [ ! -f "pubspec.yaml" ]; then
+    echo "❌ Error: pubspec.yaml not found — run this script from the project root."
+    exit 1
+fi
 
 echo "🧹 Removing example counter feature..."
 
@@ -9,57 +23,117 @@ rm -rf lib/features/counter
 rm -rf test/features/counter
 echo "   ✓ Feature folders deleted"
 
-# 2. Update service_locator.dart
-if [ -f "lib/core/di/service_locator.dart" ]; then
-    # Remove imports
-    sed -i '/import.*counter/d' lib/core/di/service_locator.dart
-    # Remove registrations
-    sed -i '/ICounterLocalDataSource/d' lib/core/di/service_locator.dart
-    sed -i '/ICounterRepository.*CounterRepository/d' lib/core/di/service_locator.dart
-    sed -i '/CounterService/d' lib/core/di/service_locator.dart
-    sed -i '/CounterCubit/d' lib/core/di/service_locator.dart
-    echo "   ✓ DI registrations removed"
-fi
+# 2. Update every referencing file
+export PROJECT_ROOT="$(pwd)"
+uv run python - <<'EOF'
+import os
+import re
 
-# 3. Update route_constants.dart
-if [ -f "lib/core/router/route_constants.dart" ]; then
-    sed -i '/static const String counter/d' lib/core/router/route_constants.dart
-    echo "   ✓ Route constants updated"
-fi
+root = os.environ['PROJECT_ROOT']
 
-# 4. Update app_router.dart
-if [ -f "lib/core/router/app_router.dart" ]; then
-    # Remove import
-    sed -i '/import.*counter_screen.dart/d' lib/core/router/app_router.dart
-    sed -i '/import.*counter_cubit.dart/d' lib/core/router/app_router.dart
-    # Remove GoRoute block for counter. This is a bit tricky with sed, 
-    # but we can look for the specific pattern.
-    sed -i '/GoRoute(/{:a;N;/path: Routes.counter/!ba;d}' lib/core/router/app_router.dart 2>/dev/null || true
-    echo "   ✓ Router updated"
-fi
+def read(rel):
+    with open(os.path.join(root, rel), encoding='utf-8') as f:
+        return f.read()
 
-# 5. Remove button from home_screen.dart
-if [ -f "lib/features/home/presentation/screens/home_screen.dart" ]; then
-    # Remove the FilledButton.icon that navigates to counter
-    sed -i '/FilledButton.icon(/{:a;N;/Routes.counter/!ba;d}' lib/features/home/presentation/screens/home_screen.dart 2>/dev/null || true
-    # Remove the helper text below it
-    sed -i '/A demo feature showing BLoC state management/d' lib/features/home/presentation/screens/home_screen.dart 2>/dev/null || true
-    echo "   ✓ Home screen cleaned up"
-fi
+def write(rel, content):
+    with open(os.path.join(root, rel), 'w', encoding='utf-8') as f:
+        f.write(content)
 
-# 6. Update app_test.dart
-if [ -f "test/app_test.dart" ]; then
-    sed -i '/import.*counter/d' test/app_test.dart
-    sed -i '/class MockCounterCubit/d' test/app_test.dart
-    sed -i '/late MockCounterCubit/d' test/app_test.dart
-    sed -i '/registerFallbackValue(const CounterState())/d' test/app_test.dart
-    sed -i '/mockCounterCubit = MockCounterCubit()/d' test/app_test.dart
-    # Remove stubs block
-    sed -i '/when(() => mockCounterCubit.state)/d' test/app_test.dart
-    sed -i '/when(() => mockCounterCubit.stream)/d' test/app_test.dart
-    sed -i '/when(() => mockCounterCubit.close())/d' test/app_test.dart
-    sed -i '/getIt.registerFactory<CounterCubit>/d' test/app_test.dart
-    echo "   ✓ Integration tests cleaned up"
-fi
+def remove_block(content, opener, marker):
+    """Remove the balanced-parenthesis block starting at each `opener`
+    occurrence whose block contains `marker` (and its trailing comma)."""
+    search_from = 0
+    while True:
+        start = content.find(opener, search_from)
+        if start == -1:
+            return content
+        depth = 0
+        i = content.find('(', start)
+        j = i
+        while j < len(content):
+            if content[j] == '(':
+                depth += 1
+            elif content[j] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        block = content[start:j + 1]
+        if marker in block:
+            begin = content.rfind('\n', 0, start) + 1
+            end = j + 1
+            if end < len(content) and content[end] == ',':
+                end += 1
+            if end < len(content) and content[end] == '\n':
+                end += 1
+            return content[:begin] + content[end:]
+        search_from = j + 1
+
+# --- service_locator.dart: counter imports + registrations ---------------
+rel = 'lib/core/di/service_locator.dart'
+if os.path.exists(os.path.join(root, rel)):
+    content = read(rel)
+    content = re.sub(r"import .*counter[^\n]*\n", '', content, flags=re.I)
+    content = re.sub(
+        r"\n *getIt\.register\w*<?I?Counter\w*>?\(\n(?:.*\n)*? *\);",
+        '\n',
+        content,
+    )
+    write(rel, content)
+    print('   ✓ DI registrations removed')
+
+# --- route_constants.dart: counter route constant -------------------------
+rel = 'lib/core/router/route_constants.dart'
+if os.path.exists(os.path.join(root, rel)):
+    content = read(rel)
+    content = re.sub(r" *static const String counter = '[^']*';\n", '', content)
+    write(rel, content)
+    print('   ✓ Route constants updated')
+
+# --- app_router.dart: counter imports + GoRoute block ---------------------
+rel = 'lib/core/router/app_router.dart'
+if os.path.exists(os.path.join(root, rel)):
+    content = read(rel)
+    content = re.sub(r"import .*counter[^\n]*\n", '', content, flags=re.I)
+    content = remove_block(content, 'GoRoute(', 'Routes.counter')
+    write(rel, content)
+    print('   ✓ Router updated')
+
+# --- home_screen.dart: counter button + description ------------------------
+rel = 'lib/features/home/presentation/screens/home_screen.dart'
+path = os.path.join(root, rel)
+if os.path.exists(path):
+    content = read(rel)
+    content = remove_block(content, 'FilledButton.icon(', 'tryCounterDemo')
+    content = remove_block(content, 'Text(', 'counterDemoDescription')
+    content = re.sub(r" *const SizedBox\(height: 32\),\n", '', content)
+    content = re.sub(r" *const SizedBox\(height: 8\),\n", '', content)
+    # go_router + route_constants become unused once the button is gone
+    content = re.sub(r"import 'package:go_router/go_router.dart';\n", '', content)
+    content = re.sub(r"import '.*route_constants.dart';\n", '', content)
+    write(rel, content)
+    print('   ✓ Home screen cleaned up')
+
+# --- app_test.dart: counter mocks/stubs (every line mentioning it) --------
+rel = 'test/app_test.dart'
+if os.path.exists(os.path.join(root, rel)):
+    content = read(rel)
+    content = ''.join(
+        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
+    )
+    write(rel, content)
+    print('   ✓ Integration tests cleaned up')
+
+# --- service_locator_test.dart: counter DI smoke expectations --------------
+rel = 'test/core/di/service_locator_test.dart'
+if os.path.exists(os.path.join(root, rel)):
+    content = read(rel)
+    content = ''.join(
+        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
+    )
+    write(rel, content)
+    print('   ✓ DI smoke test cleaned up')
+EOF
 
 echo "✅ Counter feature removal complete!"
+echo "   Run ./scripts/fverify.sh (or fverify) to confirm everything still passes."

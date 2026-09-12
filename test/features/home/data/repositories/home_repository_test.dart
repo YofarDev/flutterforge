@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
@@ -43,24 +45,30 @@ void main() {
         verify(() => mockDataSource.getHomeData()).called(1);
       });
 
-      test('returns Left(Failure) when datasource throws', () async {
-        when(
-          () => mockDataSource.getHomeData(),
-        ).thenThrow(Exception('Network error'));
+      test('maps unknown exceptions to Failure.unexpected', () async {
+        when(() => mockDataSource.getHomeData())
+            .thenThrow(Exception('Network error'));
 
         final Either<Failure, HomeData> result = await repository.getHomeData();
 
         expect(result.isLeft(), true);
-        result.fold((Failure failure) {
-          expect(
-            failure.map(
-              serverError: (_) => true,
-              networkError: (_) => false,
-              unauthorized: (_) => false,
-            ),
-            true,
-          );
-        }, (_) => fail('Should not return Right'));
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.unexpected()),
+          (_) => fail('Should not return Right'),
+        );
+      });
+
+      test('maps timeouts to Failure.networkError', () async {
+        when(() => mockDataSource.getHomeData())
+            .thenThrow(TimeoutException('timed out'));
+
+        final Either<Failure, HomeData> result = await repository.getHomeData();
+
+        expect(result.isLeft(), true);
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.networkError()),
+          (_) => fail('Should not return Right'),
+        );
       });
 
       test('maps DTO to domain correctly', () async {

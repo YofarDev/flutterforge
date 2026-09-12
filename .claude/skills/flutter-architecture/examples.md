@@ -36,6 +36,8 @@ final router = GoRouter(
 ```dart
 // WRONG - same build context tries to consume immediately
 class MyScreen extends StatelessWidget {
+  const MyScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
@@ -45,7 +47,7 @@ class MyScreen extends StatelessWidget {
   }
 }
 
-// CORRECT - provide at the route boundary
+// CORRECT - provide at the route boundary; the screen is a pure consumer
 GoRoute(
   path: '/myscreen',
   builder: (_, __) => BlocProvider(

@@ -1,4 +1,5 @@
 import 'package:fpdart/fpdart.dart';
+
 import '../../../../core/models/failure.dart';
 import '../../domain/repositories/counter_repository.dart';
 import '../../domain/models/counter_settings.dart';
@@ -15,8 +16,10 @@ class CounterRepository implements ICounterRepository {
     try {
       final CounterSettingsDto dto = await _dataSource.getSettings();
       return Right<Failure, CounterSettings>(dto.toDomain());
-    } catch (e) {
-      return Left<Failure, CounterSettings>(Failure.serverError(message: e.toString()));
+    } catch (e, st) {
+      return Left<Failure, CounterSettings>(
+        Failure.fromException(e, stackTrace: st, tag: 'CounterRepository'),
+      );
     }
   }
 
@@ -26,8 +29,10 @@ class CounterRepository implements ICounterRepository {
       final CounterSettingsDto dto = CounterSettingsDto.fromDomain(settings);
       await _dataSource.saveSettings(dto);
       return const Right<Failure, void>(null);
-    } catch (e) {
-      return Left<Failure, void>(Failure.serverError(message: e.toString()));
+    } catch (e, st) {
+      return Left<Failure, void>(
+        Failure.fromException(e, stackTrace: st, tag: 'CounterRepository'),
+      );
     }
   }
 }

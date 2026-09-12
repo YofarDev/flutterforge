@@ -4,7 +4,7 @@ description: >
   ONLY activate this skill when the user explicitly types the command "/prepare-context".
   Do NOT trigger this skill based on any other phrasing, keywords, or inferred intent —
   even if the user mentions exporting files, uploading context, or preparing for ChatGPT,
-  Claude, Gemini, or similar tools. Wait for the exact command.
+  ChatGPT, Claude, Codex, Gemini, or similar tools. Wait for the exact command.
 # Context Export Skill
 
 Export only the files needed to answer the user's specific external question.

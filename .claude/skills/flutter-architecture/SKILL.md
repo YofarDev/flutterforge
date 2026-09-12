@@ -11,10 +11,11 @@ description: "Use when creating new Flutter features, refactoring existing Flutt
 |------|----------|
 | Features | Layers: `presentation/ → domain/ ← data/` |
 | State | **Cubit default**; use BLoC when explicit events or concurrency policies improve clarity |
+| State shape | **Union states** for load-lifecycle screens; **flat `copyWith` state** for persistent interactive state |
 | Listeners | **Always `MultiBlocListener`** — never nest |
 | Files | Split when a file has **more than one reason to change**, not by line count |
 | Models | `freezed` preferred; plain sealed immutable models/states are acceptable when exhaustive |
-| Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz) |
+| Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz); map unknown exceptions via `Failure.fromException` |
 | DI | `get_it` — registrations in `service_locator.dart`; resolve from app/route composition roots |
 | Cubit deps | **Cubits never depend on other cubits** — use domain services |
 
@@ -134,9 +135,16 @@ class AuthCubit extends Cubit<AuthState> {
 
 ## State Pattern (`freezed` default; sealed states acceptable)
 
+Pick the idiom by screen behavior — don't mix idioms within one screen:
+
+- **Union states** for **load-lifecycle screens** (fetch, submit, connect): one variant active at a time, exhaustive `when()` in the UI, and failure is a visible state — never a swallowed branch.
+- **Flat `copyWith` states** for **persistent interactive state** (a counter, a form, filter selections): many independent fields evolving over time.
+
+The template demonstrates both deliberately: `home` uses the union idiom, `counter` the flat one.
+
 ```dart
 @freezed
-class AuthState with _$AuthState {
+sealed class AuthState with _$AuthState {
   const factory AuthState.initial() = _Initial;
   const factory AuthState.loading() = _Loading;
   const factory AuthState.authenticated(User user) = _Authenticated;
@@ -152,7 +160,7 @@ state.when(
 );
 ```
 
-Use `freezed` by default for union ergonomics such as `when`, `map`, and `copyWith`. Plain Dart sealed states are also acceptable when they stay immutable and the UI handles them exhaustively.
+Use `freezed` by default for union ergonomics such as `when`, `map`, and `copyWith`. Plain Dart sealed states are also acceptable when they stay immutable and the UI handles them exhaustively. Either way, a screen that loads data must expose a failure state — swallowing an error branch (or falling back silently without logging) is not an option.
 
 ---
 
@@ -235,12 +243,14 @@ class AuthRepositoryImpl implements IAuthRepository {
   @override
   Future<Either<Failure, User>> login(String email, String password) async {
     try {
-      final dto = await _api.login(email: email, password: password);
-      return Right(dto.toDomain());
+      final AuthDto dto = await _api.login(email: email, password: password);
+      return Right<Failure, User>(dto.toDomain());
     } on ApiException catch (e) {
-      return Left(Failure(e.message));
-    } catch (e) {
-      return Left(const Failure('Unexpected error'));
+      return Left<Failure, User>(Failure.serverError(message: e.message));
+    } catch (e, st) {
+      // Log the details, return a typed failure — never leak raw exception
+      // strings into UI-facing messages.
+      return Left<Failure, User>(Failure.fromException(e, stackTrace: st));
     }
   }
 }
@@ -341,6 +351,7 @@ Use broadcast streams for ephemeral events such as animations, toasts, or one-of
 | Cubit depending on another cubit | Extract shared logic to domain service |
 | `context.read` after `await` | Capture reference before the `await` |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
+| Catch-all `Failure.serverError(message: e.toString())` | Map known exceptions to specific variants; route the rest through `Failure.fromException` |
 | Service holding a cubit ref (even via interface) | Publish domain events or durable domain state; cubit subscribes/reads |
 | Everything shared goes in `core/` | Keep `core/` for infrastructure; extract stable shared business logic into a dedicated module/package |
 
@@ -384,15 +395,17 @@ Signs a file does **not** need splitting:
 4. **Define the repository interface before the implementation**
 5. **Does the new cubit need to react to another cubit?** — if yes, extract a domain service instead
 6. **Register dependencies in `service_locator.dart`** — keep registration and lifetimes in one place
-7. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope
+7. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope (the route builder provides the cubit; the screen is a pure consumer)
 8. **Add architecture tests** — repository mapping/failure tests, cubit/bloc state tests, and a DI smoke test for new registrations
+9. **Run `fverify`** (or `flutter analyze` + `flutter test`) before finishing — the architecture boundary tests fail on any rule violation
 
 ## Minimum Architecture Tests
 
 - repository tests for DTO-to-domain mapping and failure translation
-- cubit/bloc tests for the important state transitions
+- cubit/bloc tests for the important state transitions — including the failure path
 - widget tests for critical screens with their providers/listeners wired
 - a DI smoke test for new registrations or `registerFactoryParam` flows
+- architecture boundary tests (`test/architecture_test.dart`) stay green — extend them when you add a rule from this skill
 
 ---
 

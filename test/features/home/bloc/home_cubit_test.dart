@@ -12,8 +12,9 @@ class MockHomeService extends Mock implements HomeService {}
 
 /// Tests for the HomeCubit.
 ///
-/// These tests verify the business logic of the home feature,
-/// particularly the async initialization and state management.
+/// These verify the union-state lifecycle: loading, loaded, and — critically —
+/// that a repository failure becomes a visible failure state instead of being
+/// swallowed.
 void main() {
   setUpAll(() {
     registerFallbackValue(
@@ -34,16 +35,13 @@ void main() {
       homeCubit.close();
     });
 
-    test('initial state has isLoading false and empty welcomeMessage', () {
-      expect(
-        homeCubit.state,
-        const HomeState(isLoading: false, welcomeMessage: ''),
-      );
+    test('initial state is HomeState.initial', () {
+      expect(homeCubit.state, const HomeState.initial());
     });
 
     group('initialize', () {
       blocTest<HomeCubit, HomeState>(
-        'emits loading state then loaded state with welcome message',
+        'emits [loading, loaded] when load succeeds',
         setUp: () {
           when(() => mockHomeService.loadHomeData()).thenAnswer(
             (_) async => Right<Failure, HomeData>(
@@ -53,67 +51,54 @@ void main() {
               ),
             ),
           );
-          when(
-            () => mockHomeService.formatWelcomeMessage(any()),
-          ).thenReturn('Welcome to the app!');
+          when(() => mockHomeService.formatWelcomeMessage(any()))
+              .thenReturn('Welcome to the app!');
         },
         build: () => homeCubit,
         act: (HomeCubit cubit) => cubit.initialize(),
         expect: () => <HomeState>[
-          const HomeState(isLoading: true, welcomeMessage: ''),
-          const HomeState(
-            isLoading: false,
-            welcomeMessage: 'Welcome to the app!',
-          ),
+          const HomeState.loading(),
+          const HomeState.loaded(welcomeMessage: 'Welcome to the app!'),
         ],
       );
 
       blocTest<HomeCubit, HomeState>(
-        'emits loading state then failure state (isLoading: false) on error',
+        'emits [loading, failure] when load fails',
         setUp: () {
           when(() => mockHomeService.loadHomeData()).thenAnswer(
-            (_) async => const Left<Failure, HomeData>(
-              Failure.serverError(message: 'error'),
-            ),
+            (_) async => const Left<Failure, HomeData>(Failure.networkError()),
           );
         },
         build: () => homeCubit,
         act: (HomeCubit cubit) => cubit.initialize(),
         expect: () => <HomeState>[
-          const HomeState(isLoading: true, welcomeMessage: ''),
-          const HomeState(isLoading: false, welcomeMessage: ''),
+          const HomeState.loading(),
+          const HomeState.failure(message: 'Network error occurred'),
         ],
       );
     });
 
     group('refresh', () {
       blocTest<HomeCubit, HomeState>(
-        're-initializes when refresh is called',
+        'reloads data from the loading state',
         setUp: () {
           when(() => mockHomeService.loadHomeData()).thenAnswer(
             (_) async => Right<Failure, HomeData>(
               HomeData(
-                welcomeMessage: 'Welcome to the app!',
+                welcomeMessage: 'Refreshed!',
                 lastUpdated: DateTime(2024),
               ),
             ),
           );
-          when(
-            () => mockHomeService.formatWelcomeMessage(any()),
-          ).thenReturn('Welcome to the app!');
+          when(() => mockHomeService.formatWelcomeMessage(any()))
+              .thenReturn('Refreshed!');
         },
         build: () => homeCubit,
-        seed: () => const HomeState(
-          isLoading: false,
-          welcomeMessage: 'Previous message',
-        ),
+        seed: () => const HomeState.loaded(welcomeMessage: 'Stale'),
         act: (HomeCubit cubit) => cubit.refresh(),
         expect: () => <HomeState>[
-          const HomeState(isLoading: true, welcomeMessage: 'Previous message'),
-          const HomeState(
-            isLoading: false,
-            welcomeMessage: 'Welcome to the app!',
-          ),
+          const HomeState.loading(),
+          const HomeState.loaded(welcomeMessage: 'Refreshed!'),
         ],
       );
     });

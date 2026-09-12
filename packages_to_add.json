@@ -1,16 +1,13 @@
 {
-    "dependencies":
-    [
+    "dependencies": [
         "flutter_bloc",
-        "equatable",
         "go_router",
         "freezed_annotation",
         "json_annotation",
         "get_it",
         "fpdart"
     ],
-    "dev_dependencies":
-    [
+    "dev_dependencies": [
         "flutter_lints",
         "bloc_test",
         "mocktail",

@@ -3,7 +3,6 @@ set -e
 
 # Resolve flutterforge root dynamically based on script location
 FLUTTERFORGE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SKILLS_SRC="$FLUTTERFORGE_ROOT/.claude/skills"
 
 echo "Pulling latest flutterforge..."
 PULL_OUTPUT=$(git -C "$FLUTTERFORGE_ROOT" pull)
@@ -14,11 +13,9 @@ if echo "$PULL_OUTPUT" | grep -q "Already up to date."; then
   exit 0
 fi
 
-echo "Syncing skills to ~/.claude/skills/..."
-for skill in "$SKILLS_SRC"/*/; do
-  rm -rf ~/.claude/skills/$(basename "$skill")
-  cp -r "$skill" ~/.claude/skills/$(basename "$skill")
-done
+echo "Syncing skills to user-level skill folders..."
+# .agents/skills is the single source of truth; sync_skills.sh propagates it
+# to .claude/, .codex/ and (with --user) ~/.agents/skills + ~/.claude/skills
+bash "$FLUTTERFORGE_ROOT/scripts/sync_skills.sh" --user
 
-echo "Done! Skills synced:"
-ls ~/.claude/skills/
+echo "Done!"

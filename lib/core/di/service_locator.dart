@@ -39,6 +39,8 @@ Future<void> setupServiceLocator() async {
   );
 
   // --- Cubits (Factories) ---
-  getIt.registerFactory<CounterCubit>(() => CounterCubit(getIt<CounterService>()));
+  getIt.registerFactory<CounterCubit>(
+    () => CounterCubit(getIt<CounterService>()),
+  );
   getIt.registerFactory<HomeCubit>(() => HomeCubit(getIt<HomeService>()));
 }

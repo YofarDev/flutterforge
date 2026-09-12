@@ -2,6 +2,10 @@
 
 # Add localized strings to Flutter .arb files and regenerate localization files
 # Usage: add-l10n-string <keyName> <frString> <enString> [projectPath]
+#
+# Validates that the FR and EN strings use the same {placeholders} before
+# touching either file (gen-l10n rejects mismatches), writes both arb files,
+# then regenerates. Requires: uv, flutter.
 
 set -e
 
@@ -9,6 +13,7 @@ set -e
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Check arguments
@@ -53,68 +58,83 @@ if [ ! -f "$EN_FILE" ]; then
     exit 1
 fi
 
-# Function to safely add an entry to an ARB file
-add_to_arb() {
-    # Exporting as environment variables makes it 100% safe to pass to Python 
-    # without worrying about escaping quotes, newlines, or backslashes in Bash.
-    export ARB_FILE="$1"
-    export ARB_KEY="$2"
-    export ARB_VALUE="$3"
+# Validate + add the key to both files in one pass. Nothing is written unless
+# both files parse and the placeholder sets of FR/EN match.
+export ARB_FR_FILE="$FR_FILE"
+export ARB_EN_FILE="$EN_FILE"
+export ARB_KEY="$KEY_NAME"
+export ARB_FR_VALUE="$FR_STRING"
+export ARB_EN_VALUE="$EN_STRING"
 
-    # Notice the quotes around 'EOF'. This prevents Bash from evaluating variables inside,
-    # leaving Python to read them securely from os.environ.
-    uv run python - <<'EOF'
+echo -e "${BLUE}Validating and adding '$KEY_NAME'...${NC}"
+uv run python - <<'EOF'
 import json
 import os
 import re
 import sys
 
-file_path = os.environ['ARB_FILE']
+fr_file = os.environ['ARB_FR_FILE']
+en_file = os.environ['ARB_EN_FILE']
 key = os.environ['ARB_KEY']
-value = os.environ['ARB_VALUE']
+fr_value = os.environ['ARB_FR_VALUE']
+en_value = os.environ['ARB_EN_VALUE']
 
-try:
-    with open(file_path, 'r', encoding='utf-8') as f:
+def fail(msg):
+    print(f"\n\033[0;31m[!] {msg}\033[0m", file=sys.stderr)
+    sys.exit(1)
+
+def placeholders(s):
+    return sorted(set(re.findall(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}", s)))
+
+# Key must be a valid Dart identifier (gen-l10n generates a getter from it)
+if not re.fullmatch(r"[a-z][a-zA-Z0-9]*", key):
+    fail(f"Key '{key}' must be lowerCamelCase (e.g., dashboardWelcome).")
+
+# FR and EN must use identical placeholders, or gen-l10n will fail later
+if placeholders(fr_value) != placeholders(en_value):
+    fail(
+        "Placeholder mismatch between FR and EN strings:\n"
+        f"    FR: {placeholders(fr_value) or 'none'}\n"
+        f"    EN: {placeholders(en_value) or 'none'}"
+    )
+
+def read(path):
+    with open(path, 'r', encoding='utf-8') as f:
         content = f.read()
-
-    # FIX: Remove trailing commas (which are common in Dart/Flutter but invalid in strict JSON)
+    # Remove trailing commas (common in Dart, invalid in strict JSON)
     content = re.sub(r',(\s*[}\]])', r'\1', content)
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as e:
+        fail(f"JSON Decode Error in {path}: {e}\nFix the file manually, then retry.")
 
-    # Parse as JSON to get existing data
-    data = json.loads(content)
-    
-    # Add the new entry
-    data[key] = value
+fr_data = read(fr_file)
+en_data = read(en_file)
 
-    # Write back with proper formatting
-    with open(file_path, 'w', encoding='utf-8') as f:
+if key in en_data:
+    fail(f"Key '{key}' already exists in {os.path.basename(en_file)}.")
+
+fr_data[key] = fr_value
+en_data[key] = en_value
+
+for path, data in ((fr_file, fr_data), (en_file, en_data)):
+    with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write('\n')
 
-except json.JSONDecodeError as e:
-    print(f"\n\033[0;31m[!] JSON Decode Error in {file_path}\033[0m", file=sys.stderr)
-    print(f"\033[0;31m[!] Please check if the file has syntax errors (like missing quotes or comments).\033[0m", file=sys.stderr)
-    print(f"\033[0;31m[!] Details: {e}\033[0m\n", file=sys.stderr)
-    sys.exit(1)
-except Exception as e:
-    print(f"\n\033[0;31m[!] Error: {e}\033[0m\n", file=sys.stderr)
-    sys.exit(1)
+print(f"    FR: {fr_value}")
+print(f"    EN: {en_value}")
 EOF
-}
-
-# Add to French file
-echo -e "${BLUE}Adding to app_fr.arb...${NC}"
-add_to_arb "$FR_FILE" "$KEY_NAME" "$FR_STRING"
-
-# Add to English file
-echo -e "${BLUE}Adding to app_en.arb...${NC}"
-add_to_arb "$EN_FILE" "$KEY_NAME" "$EN_STRING"
 
 # Regenerate localization files
 echo -e "${BLUE}Regenerating localization files...${NC}"
 cd "$PROJECT_PATH"
-flutter gen-l10n
+if ! flutter gen-l10n; then
+    echo ""
+    echo -e "${YELLOW}⚠️  ARB files were updated but 'flutter gen-l10n' FAILED.${NC}"
+    echo -e "${YELLOW}    Fix the error above, then re-run 'flutter gen-l10n' — the code will${NC}"
+    echo -e "${YELLOW}    not compile with the new key until generation succeeds.${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}✓ Successfully added localization key: $KEY_NAME${NC}"
-echo -e "${GREEN}  FR: $FR_STRING${NC}"
-echo -e "${GREEN}  EN: $EN_STRING${NC}"

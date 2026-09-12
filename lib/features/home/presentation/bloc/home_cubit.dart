@@ -10,13 +10,17 @@ import 'home_state.dart';
 class HomeCubit extends Cubit<HomeState> {
   final HomeService _homeService;
 
-  HomeCubit(this._homeService) : super(const HomeState()) {
+  HomeCubit(this._homeService) : super(const HomeState.initial()) {
     AppLogger.info('HomeCubit initialized', tag: 'HomeCubit');
   }
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _load();
+
+  Future<void> refresh() => _load();
+
+  Future<void> _load() async {
     AppLogger.debug('Loading home data...', tag: 'HomeCubit');
-    emit(state.copyWith(isLoading: true));
+    emit(const HomeState.loading());
 
     final Either<Failure, HomeData> result = await _homeService.loadHomeData();
 
@@ -25,9 +29,9 @@ class HomeCubit extends Cubit<HomeState> {
         AppLogger.error(
           'Failed to load home data',
           tag: 'HomeCubit',
-          error: failure.toString(),
+          error: failure.message,
         );
-        emit(state.copyWith(isLoading: false));
+        emit(HomeState.failure(message: failure.message));
       },
       (HomeData homeData) {
         final String welcomeMessage = _homeService.formatWelcomeMessage(
@@ -35,13 +39,8 @@ class HomeCubit extends Cubit<HomeState> {
         );
 
         AppLogger.info('Home data loaded successfully', tag: 'HomeCubit');
-        emit(state.copyWith(isLoading: false, welcomeMessage: welcomeMessage));
+        emit(HomeState.loaded(welcomeMessage: welcomeMessage));
       },
     );
-  }
-
-  Future<void> refresh() async {
-    AppLogger.debug('Refreshing home data...', tag: 'HomeCubit');
-    await initialize();
   }
 }

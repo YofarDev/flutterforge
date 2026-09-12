@@ -185,8 +185,10 @@ class ${FEATURE_PASCAL}Repository implements I${FEATURE_PASCAL}Repository {
     try {
       final ${FEATURE_PASCAL}Dto dto = await _dataSource.getData();
       return Right<Failure, ${FEATURE_PASCAL}>(dto.toDomain());
-    } catch (e) {
-      return Left<Failure, ${FEATURE_PASCAL}>(Failure.serverError(message: e.toString()));
+    } catch (e, st) {
+      return Left<Failure, ${FEATURE_PASCAL}>(
+        Failure.fromException(e, stackTrace: st, tag: '${FEATURE_PASCAL}Repository'),
+      );
     }
   }
 }
@@ -201,6 +203,8 @@ import '../../domain/models/${FEATURE_SNAKE}.dart';
 
 part '${FEATURE_SNAKE}_state.freezed.dart';
 
+/// Union-state idiom for a load-lifecycle screen — see the
+/// flutter-architecture skill for when to use this vs a flat state.
 @freezed
 sealed class ${FEATURE_PASCAL}State with _\$${FEATURE_PASCAL}State {
   const factory ${FEATURE_PASCAL}State.initial() = _Initial;
@@ -236,10 +240,10 @@ class ${FEATURE_PASCAL}Cubit extends Cubit<${FEATURE_PASCAL}State> {
 EOF
 
 # 10. Presentation Layer: Screen
+# The screen is a pure consumer — the route provides the cubit (see next steps).
 cat > lib/features/$FEATURE_SNAKE/presentation/screens/${FEATURE_SNAKE}_screen.dart <<EOF
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../../../core/di/service_locator.dart';
 import '../../domain/models/${FEATURE_SNAKE}.dart';
 import '../bloc/${FEATURE_SNAKE}_cubit.dart';
 import '../bloc/${FEATURE_SNAKE}_state.dart';
@@ -249,10 +253,7 @@ class ${FEATURE_PASCAL}Screen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider<${FEATURE_PASCAL}Cubit>(
-      create: (_) => getIt<${FEATURE_PASCAL}Cubit>()..loadData(),
-      child: const ${FEATURE_PASCAL}View(),
-    );
+    return const ${FEATURE_PASCAL}View();
   }
 }
 
@@ -263,12 +264,13 @@ class ${FEATURE_PASCAL}View extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        // TODO(l10n): replace with a localized title — fstr <key> "<fr>" "<en>"
         title: const Text('${FEATURE_PASCAL}'),
       ),
       body: BlocBuilder<${FEATURE_PASCAL}Cubit, ${FEATURE_PASCAL}State>(
         builder: (BuildContext context, ${FEATURE_PASCAL}State state) {
           return state.when(
-            initial: () => const Center(child: Text('Initial')),
+            initial: () => const Center(child: CircularProgressIndicator()),
             loading: () => const Center(child: CircularProgressIndicator()),
             loaded: (${FEATURE_PASCAL} data) => Center(child: Text('Data: \${data.name}')),
             error: (String message) => Center(child: Text('Error: \$message')),
@@ -398,6 +400,23 @@ fi
 
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
-echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}"
-echo -e "2. Add a route in ${GREEN}lib/core/router/app_router.dart${NC} pointing to ${GREEN}const ${FEATURE_PASCAL}Screen()${NC}"
+echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}:"
+echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}RemoteDataSource>(() => ${FEATURE_PASCAL}RemoteDataSource());"
+echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}Repository>(() => ${FEATURE_PASCAL}Repository(getIt<I${FEATURE_PASCAL}RemoteDataSource>()));"
+echo -e "   getIt.registerLazySingleton<${FEATURE_PASCAL}Service>(() => ${FEATURE_PASCAL}Service(getIt<I${FEATURE_PASCAL}Repository>()));"
+echo -e "   getIt.registerFactory<${FEATURE_PASCAL}Cubit>(() => ${FEATURE_PASCAL}Cubit(getIt<${FEATURE_PASCAL}Service>()));"
+echo -e "2. Add the route in ${GREEN}lib/core/router/app_router.dart${NC} — the route provides the cubit:"
+echo -e "   GoRoute("
+echo -e "     path: Routes.${FEATURE_CAMEL},"
+echo -e "     name: '${FEATURE_PASCAL}',"
+echo -e "     builder: (context, state) => BlocProvider<${FEATURE_PASCAL}Cubit>("
+echo -e "       create: (_) => getIt<${FEATURE_PASCAL}Cubit>()..loadData(),"
+echo -e "       child: const ${FEATURE_PASCAL}Screen(),"
+echo -e "     ),"
+echo -e "   )"
+echo -e "   ...and the constant in ${GREEN}lib/core/router/route_constants.dart${NC}:"
+echo -e "   static const String ${FEATURE_CAMEL} = '/${FEATURE_SNAKE}';"
+echo -e "3. Update ${GREEN}test/core/di/service_locator_test.dart${NC} with the new registrations."
+echo -e "4. Localize the screen strings: ${GREEN}fstr <key> \"<fr>\" \"<en>\"${NC}"
+echo -e "5. Run ${GREEN}fverify${NC} before finishing."
 echo ""

@@ -28,7 +28,7 @@ class CounterView extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
-          tooltip: 'Back to Home',
+          tooltip: l10n.commonBack,
         ),
       ),
       body: SafeArea(
@@ -65,12 +65,14 @@ class CounterView extends StatelessWidget {
                   FloatingActionButton(
                     heroTag: 'decrement',
                     onPressed: () => context.read<CounterCubit>().decrement(),
+                    tooltip: l10n.counterDecrement,
                     child: const Icon(Icons.remove),
                   ),
                   const SizedBox(width: 16),
                   FloatingActionButton(
                     heroTag: 'increment',
                     onPressed: () => context.read<CounterCubit>().increment(),
+                    tooltip: l10n.counterIncrement,
                     child: const Icon(Icons.add),
                   ),
                 ],

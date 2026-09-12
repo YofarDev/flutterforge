@@ -4,22 +4,26 @@ import 'dart:io';
 void main(List<String> args) async {
   if (args.isEmpty || args.any((arg) => arg == '--help' || arg == '-h')) {
     print(
-      'Usage: dart create_project.dart [--org=<organization>] [flutter_create_args] <project_name>',
+      'Usage: dart create_project.dart [--org=<organization>] [--no-open] [flutter_create_args] <project_name>',
     );
     print(
       'Example: dart create_project.dart --org=com.mycompany --platforms=android,ios my_new_app',
     );
+    print('  --no-open  Do not open the project in VS Code when done');
     return;
   }
 
   // 1. Parse Arguments
   String org = 'fr.yofardev';
+  bool openInVsCode = true;
   String? projectName;
   final flutterArgs = <String>[];
 
   for (final arg in args) {
     if (arg.startsWith('--org=')) {
       org = arg.substring(6);
+    } else if (arg == '--no-open') {
+      openInVsCode = false;
     } else if (!arg.startsWith('-')) {
       projectName = arg;
       flutterArgs.add(arg);
@@ -161,6 +165,12 @@ void main(List<String> args) async {
       .where((line) => !line.trimLeft().startsWith('#'))
       .join('\n');
 
+  // Replace the default description with the project name
+  content = content.replaceFirst(
+    RegExp(r'^description: .*$', multiLine: true),
+    'description: "$projectName — generated with the flutterforge template."',
+  );
+
   // Add generate: true under flutter:
   if (!content.contains('generate: true')) {
     content = content.replaceFirst(
@@ -256,16 +266,22 @@ void main(List<String> args) async {
     '--delete-conflicting-outputs',
   ]);
 
+  // 22. Smoke test: analyze + full test suite (architecture boundaries, DI)
+  print('🧪 Running fverify smoke test (analyze + tests)...');
+  await _runCommand('bash', ['scripts/fverify.sh']);
+
   print('✅ Project setup complete!');
 
-  // 22. Open in VS Code
-  print('📝 Opening project in VS Code...');
-  try {
-    await Process.start('code', ['.'], mode: ProcessStartMode.detached);
-  } catch (e) {
-    print(
-      '⚠️  Could not open VS Code. Make sure \'code\' command is in your PATH.',
-    );
+  // 23. Open in VS Code
+  if (openInVsCode) {
+    print('📝 Opening project in VS Code...');
+    try {
+      await Process.start('code', ['.'], mode: ProcessStartMode.detached);
+    } catch (e) {
+      print(
+        '⚠️  Could not open VS Code. Make sure \'code\' command is in your PATH.',
+      );
+    }
   }
 }
 

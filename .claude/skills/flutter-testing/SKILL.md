@@ -14,6 +14,8 @@ description: "Use when writing tests for Flutter projects, including unit tests,
 | Domain services | `flutter_test` + `mocktail` | Coordination logic, edge cases, no cubit deps |
 | Widgets | `flutter_test` | UI branches, interactions, provider wiring |
 | Screens | `flutter_test` | Integration with fake or mock cubits |
+| Architecture boundaries | `flutter_test` | Import rules, layer deps, cubit coupling |
+| DI wiring | `flutter_test` | Every registration resolves; factories return fresh instances |
 
 **Read `flutter-architecture` first** — tests should mirror the intended boundaries and lifecycles.
 
@@ -204,6 +206,21 @@ testGoldens('renders correctly', (tester) async {
   );
 });
 ```
+
+## Architecture Boundary Tests
+
+The layering rules from `flutter-architecture` as executable gates: no cross-feature imports into
+`data/`/`presentation/`, presentation never imports `data/`, no cubit/bloc stored as a field,
+`core/` stays infrastructure-only outside composition roots. The template ships them at
+`test/architecture_test.dart` — run them with the rest of the suite, and extend the file whenever
+a rule is added to the skill. A rule that is not tested is a suggestion.
+
+## DI Smoke Test
+
+Every `service_locator.dart` registration must resolve, and cubit factories must return fresh
+instances. This catches missing registrations and unresolvable constructor arguments at test time
+instead of at first navigation. The template ships it at
+`test/core/di/service_locator_test.dart` — update it whenever you add a registration.
 
 ## Coverage Checklist
 

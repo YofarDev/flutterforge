@@ -7,6 +7,9 @@ import '../../domain/models/counter_settings.dart';
 import '../../domain/services/counter_service.dart';
 import 'counter_state.dart';
 
+/// Flat-state idiom: the counter is persistent interactive state, so a single
+/// copyWith-able class beats a union of load states. Compare with `HomeState`
+/// (union idiom) — see the flutter-architecture skill for when to use each.
 class CounterCubit extends Cubit<CounterState> {
   final CounterService _counterService;
 
@@ -14,13 +17,16 @@ class CounterCubit extends Cubit<CounterState> {
     AppLogger.debug('CounterCubit initialized', tag: 'CounterCubit');
   }
 
-  void increment() async {
-    final Either<Failure, CounterSettings> result =
-        await _counterService.getSettings();
+  Future<void> increment() async {
+    final Either<Failure, CounterSettings> result = await _counterService
+        .getSettings();
 
     result.fold(
       (Failure failure) {
-        // Handle failure if needed, or use default settings
+        AppLogger.warning(
+          'Falling back to default settings: ${failure.message}',
+          tag: 'CounterCubit',
+        );
         _updateCount(state.count + 1, const CounterSettings());
       },
       (CounterSettings settings) {
@@ -33,12 +39,16 @@ class CounterCubit extends Cubit<CounterState> {
     );
   }
 
-  void decrement() async {
-    final Either<Failure, CounterSettings> result =
-        await _counterService.getSettings();
+  Future<void> decrement() async {
+    final Either<Failure, CounterSettings> result = await _counterService
+        .getSettings();
 
     result.fold(
       (Failure failure) {
+        AppLogger.warning(
+          'Falling back to default settings: ${failure.message}',
+          tag: 'CounterCubit',
+        );
         _updateCount(state.count - 1, const CounterSettings());
       },
       (CounterSettings settings) {

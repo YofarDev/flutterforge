@@ -7,6 +7,7 @@ import '../../features/counter/presentation/screens/counter_screen.dart';
 import '../../features/home/presentation/bloc/home_cubit.dart';
 import '../../features/home/presentation/screens/home_screen.dart';
 import '../di/service_locator.dart';
+import '../l10n/generated/app_localizations.dart';
 import 'route_constants.dart';
 
 class AppRouter {
@@ -37,17 +38,18 @@ class AppRouter {
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
+      final AppLocalizations l10n = AppLocalizations.of(context);
       return Scaffold(
-        appBar: AppBar(title: const Text('Error')),
+        appBar: AppBar(title: Text(l10n.errorTitle)),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              const Text('Page not found'),
+              Text(l10n.pageNotFound),
               const SizedBox(height: 16),
               TextButton(
                 onPressed: () => context.go(Routes.home),
-                child: const Text('Go Home'),
+                child: Text(l10n.goHome),
               ),
             ],
           ),

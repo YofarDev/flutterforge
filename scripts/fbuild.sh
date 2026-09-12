@@ -1,69 +1,91 @@
 #!/bin/bash
+# =============================================================================
+# fbuild.sh — bump the build number, build release artifacts, collect them.
+#
+# Reads `version: x.y.z+n` from pubspec.yaml, increments n, builds, and moves
+# the artifacts to $FBUILD_OUT_DIR (default: ~/Downloads).
+#
+# Usage:
+#   ./fbuild.sh               # build Android appbundle + iOS ipa
+#   ./fbuild.sh --android     # appbundle only
+#   ./fbuild.sh --ios         # ipa only
+#   FBUILD_OUT_DIR=dist ./fbuild.sh
+# =============================================================================
 
-# Function to show error message and exit
+set -e
+
+# Portable in-place sed (BSD vs GNU flag difference)
+if sed --version >/dev/null 2>&1; then
+    sedi() { sed -i "$@"; }
+else
+    sedi() { sed -i '' "$@"; }
+fi
+
 error_exit() {
     echo "Error: $1" >&2
     exit 1
 }
 
-# 1. Read pubspec.yaml and extract version
+# -- Flags --------------------------------------------------------------------
+BUILD_ANDROID=true
+BUILD_IOS=true
+for arg in "$@"; do
+    case $arg in
+        --android) BUILD_ANDROID=true; BUILD_IOS=false ;;
+        --ios)     BUILD_ANDROID=false; BUILD_IOS=true ;;
+        *) error_exit "Unknown argument: $arg  (supported: --android, --ios)" ;;
+    esac
+done
+
+DOWNLOADS_DIR="${FBUILD_OUT_DIR:-$HOME/Downloads}"
+mkdir -p "$DOWNLOADS_DIR"
+
+# -- 1. Read and bump version -------------------------------------------------
 PUBSPEC_FILE="pubspec.yaml"
-if [ ! -f "$PUBSPEC_FILE" ]; then
-    error_exit "$PUBSPEC_FILE not found. Make sure you are in the root of a Flutter project."
-fi
+[ -f "$PUBSPEC_FILE" ] || error_exit "$PUBSPEC_FILE not found. Run from a Flutter project root."
 
-VERSION_LINE=$(grep "version:" "$PUBSPEC_FILE")
-if [ -z "$VERSION_LINE" ]; then
-    error_exit "Version line not found in $PUBSPEC_FILE."
-fi
+VERSION_LINE=$(grep -E "^version:" "$PUBSPEC_FILE" | head -1)
+[ -z "$VERSION_LINE" ] && error_exit "No top-level 'version:' line found in $PUBSPEC_FILE."
 
-# Extract version and build number
-VERSION=$(echo "$VERSION_LINE" | sed -n 's/version: \(.*\)+\(.*\)/\1/p')
-BUILD_NUMBER=$(echo "$VERSION_LINE" | sed -n 's/version: \(.*\)+\(.*\)/\2/p')
+VERSION=$(echo "$VERSION_LINE" | sed -n 's/^version: \([0-9.]*\)+\([0-9]*\)/\1/p')
+BUILD_NUMBER=$(echo "$VERSION_LINE" | sed -n 's/^version: \([0-9.]*\)+\([0-9]*\)/\2/p')
 
-if [ -z "$VERSION" ] || [ -z "$BUILD_NUMBER" ]; then
-    error_exit "Could not parse version and build number from $PUBSPEC_FILE. Expected format: version: x.y.z+n"
-fi
+[ -z "$VERSION" ] || [ -z "$BUILD_NUMBER" ] && \
+    error_exit "Could not parse version from '$VERSION_LINE'. Expected format: version: x.y.z+n"
 
-# 2. Increment build number
 NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))
-NEW_VERSION_STRING="version: $VERSION+$NEW_BUILD_NUMBER"
+NEW_VERSION_LINE="version: $VERSION+$NEW_BUILD_NUMBER"
 
-echo "Updating version from '$VERSION_LINE' to '$NEW_VERSION_STRING'"
+echo "Bumping version: $VERSION+$BUILD_NUMBER -> $VERSION+$NEW_BUILD_NUMBER"
+sedi "s|^version: $VERSION+$BUILD_NUMBER\$|$NEW_VERSION_LINE|" "$PUBSPEC_FILE" \
+    || error_exit "Failed to update $PUBSPEC_FILE."
 
-# 3. Update pubspec.yaml
-# Using sed for in-place replacement. The '' after -i is for macOS compatibility.
-sed -i '' "s/$VERSION_LINE/$NEW_VERSION_STRING/" "$PUBSPEC_FILE" || error_exit "Failed to update $PUBSPEC_FILE."
+grep -q "^$NEW_VERSION_LINE\$" "$PUBSPEC_FILE" || \
+    error_exit "Version line did not update as expected — check pubspec.yaml manually."
 
-# 4. Run flutter build appbundle
-echo "Building App Bundle..."
-flutter build appbundle || error_exit "flutter build appbundle failed."
+# -- 2. Build and collect artifacts --------------------------------------------
+collect_artifact() {
+    local dir="$1" pattern="$2" label="$3"
+    local file
+    file=$(find "$dir" -name "$pattern" -print -quit 2>/dev/null || true)
+    if [ -f "$file" ]; then
+        echo "Moving $label to $DOWNLOADS_DIR/"
+        mv "$file" "$DOWNLOADS_DIR/" || error_exit "Failed to move $label."
+    else
+        echo "Warning: $label not found under $dir"
+    fi
+}
 
-DOWNLOADS_DIR="$HOME/Downloads"
-
-# Move AppBundle
-APPBUNDLE_DIR="build/app/outputs/bundle/release/"
-APPBUNDLE_FILE=$(find "$APPBUNDLE_DIR" -name "*.aab" -print -quit)
-if [ -f "$APPBUNDLE_FILE" ]; then
-    echo "Moving App Bundle to $DOWNLOADS_DIR"
-    mv "$APPBUNDLE_FILE" "$DOWNLOADS_DIR/" || error_exit "Failed to move App Bundle."
-else
-    echo "Warning: App Bundle file not found."
+if [ "$BUILD_ANDROID" = true ]; then
+    echo "Building App Bundle..."
+    flutter build appbundle || error_exit "flutter build appbundle failed."
+    collect_artifact "build/app/outputs/bundle/release/" "*.aab" "App Bundle"
 fi
 
-# 5. Run flutter build ipa
-echo "Building IPA..."
-flutter build ipa || error_exit "flutter build ipa failed."
-
-
-# Move IPA
-IPA_DIR="build/ios/ipa/"
-IPA_FILE=$(find "$IPA_DIR" -name "*.ipa" -print -quit)
-if [ -f "$IPA_FILE" ]; then
-    echo "Moving IPA to $DOWNLOADS_DIR"
-    mv "$IPA_FILE" "$DOWNLOADS_DIR/" || error_exit "Failed to move IPA."
-else
-    echo "Warning: IPA file not found."
+if [ "$BUILD_IOS" = true ]; then
+    echo "Building IPA..."
+    flutter build ipa || error_exit "flutter build ipa failed."
+    collect_artifact "build/ios/ipa/" "*.ipa" "IPA"
 fi
 
 echo "Build script finished successfully."

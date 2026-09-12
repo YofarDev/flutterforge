@@ -24,9 +24,8 @@ void main() {
           welcomeMessage: 'Welcome!',
           lastUpdated: DateTime(2024),
         );
-        when(
-          () => mockRepository.getHomeData(),
-        ).thenAnswer((_) async => Right<Failure, HomeData>(data));
+        when(() => mockRepository.getHomeData())
+            .thenAnswer((_) async => Right<Failure, HomeData>(data));
 
         final Either<Failure, HomeData> result = await service.loadHomeData();
 
@@ -49,25 +48,22 @@ void main() {
     });
 
     group('formatWelcomeMessage', () {
-      test('returns message when not empty', () {
+      test('returns message unchanged when already trimmed', () {
         expect(service.formatWelcomeMessage('Hello'), 'Hello');
         expect(service.formatWelcomeMessage('Welcome!'), 'Welcome!');
-        expect(service.formatWelcomeMessage('  Hello  '), '  Hello  ');
       });
 
-      test('returns "Welcome!" when message is empty', () {
-        expect(service.formatWelcomeMessage(''), 'Welcome!');
+      test('trims surrounding whitespace', () {
+        expect(service.formatWelcomeMessage('  Hello  '), 'Hello');
+        expect(service.formatWelcomeMessage('\tHi\n'), 'Hi');
       });
 
-      test('returns "Welcome!" when message is whitespace only', () {
-        expect(service.formatWelcomeMessage('   '), 'Welcome!');
-        expect(service.formatWelcomeMessage('\t\n'), 'Welcome!');
-        expect(service.formatWelcomeMessage('  \t  \n  '), 'Welcome!');
-      });
-
-      test('trims message before checking emptiness', () {
-        expect(service.formatWelcomeMessage('  Hello  '), '  Hello  ');
-        expect(service.formatWelcomeMessage('\tHi\n'), '\tHi\n');
+      test('returns empty string when there is no message', () {
+        // The presentation layer falls back to a localized default on empty.
+        expect(service.formatWelcomeMessage(''), '');
+        expect(service.formatWelcomeMessage('   '), '');
+        expect(service.formatWelcomeMessage('\t\n'), '');
+        expect(service.formatWelcomeMessage('  \t  \n  '), '');
       });
     });
   });

@@ -232,15 +232,20 @@ void main() {
     final mockCubit = MockAuthCubit();
     when(() => mockCubit.state).thenReturn(const AuthState.initial());
 
-    await tester.pumpWidgetBuilder(
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
       BlocProvider<AuthCubit>.value(
         value: mockCubit,
-        child: const LoginScreen(),
+        child: const MaterialApp(home: LoginScreen()),
       ),
-      surfaceSize: const Size(390, 844),
     );
 
-    await screenMatchesGolden(tester, 'login_screen_initial');
+    await expectLater(
+      find.byType(LoginScreen),
+      matchesGoldenFile('goldens/login_screen_initial.png'),
+    );
   });
 }
 ```

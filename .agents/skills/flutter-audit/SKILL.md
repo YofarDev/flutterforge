@@ -14,7 +14,14 @@ Structured analysis against `flutter-architecture` standards. Produces a priorit
 
 ## Step 1 — Pre-Analysis
 
-Run `fanal` (in current folder) if available. It should summarize: file tree, feature map,
+If the project ships architecture boundary tests (`test/architecture_test.dart`), run them first —
+their failures are pre-localized violations with file:line precision:
+
+```bash
+flutter test test/architecture_test.dart
+```
+
+Then run `fanal` (in current folder) if available. It should summarize: file tree, feature map,
 file sizes, cross-feature imports, DI wiring, cubit coupling, routing, and tests.
 
 If `fanal` is unavailable, prefer `rg`; use `grep` only as a fallback.
@@ -224,6 +231,7 @@ Methods to move: [list]
 
 ## Rules
 
+- **Boundary tests outrank grep.** If `test/architecture_test.dart` exists, its findings are ground truth; use grep only for what it does not cover.
 - **Script first, files second.** Use `fanal` if available.
 - **Prefer `rg`.** Use broader scripts before manual spot checks.
 - **Be specific.** Every issue names a file and line number.

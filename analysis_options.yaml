@@ -6,6 +6,13 @@ analyzer:
   exclude:
     - '**/*.g.dart'
     - '**/*.freezed.dart'
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
 
 
 linter:
@@ -31,14 +38,13 @@ linter:
     
     # ------ Import Style ------ #
     # When enabled, requires relative imports within your own package
-    # Example: import '../../models/user.dart' instead of import 'package:my_app/models/user.dart'
+    # Example: import '../../models/user.dart' instead of 'package:my_app/models/user.dart'
     # Benefits: Easier refactoring, shorter import paths, clearer project structure
     prefer_relative_imports: true
-    
-    # ------ BuildContext Usage ------ #
-    # When disabled, allows using BuildContext across async gaps without warnings
-    # The rule has many false positives, especially with mounted checks
-    # Example: Allows 'await future; Navigator.pop(context)' without warnings
-    use_build_context_synchronously: false
+
+    # use_build_context_synchronously stays ENABLED (flutter_lints default):
+    # it enforces the "capture context.read() before await" rule from the
+    # flutter-architecture skill. Guard with `mounted` checks when you must
+    # use a context after an await.
 
     unintended_html_in_doc_comment: false

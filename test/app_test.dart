@@ -4,15 +4,12 @@ import 'package:my_flutter_app/app.dart';
 import 'package:my_flutter_app/core/di/service_locator.dart';
 import 'package:my_flutter_app/features/counter/presentation/bloc/counter_cubit.dart';
 import 'package:my_flutter_app/features/counter/presentation/bloc/counter_state.dart';
-import 'package:my_flutter_app/features/home/domain/services/home_service.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_state.dart';
 
 class MockHomeCubit extends Mock implements HomeCubit {}
 
 class MockCounterCubit extends Mock implements CounterCubit {}
-
-class MockHomeService extends Mock implements HomeService {}
 
 /// Integration/Smoke tests for the entire app.
 ///
@@ -25,8 +22,8 @@ void main() {
   late MockCounterCubit mockCounterCubit;
 
   setUpAll(() {
-    registerFallbackValue(const HomeState());
     registerFallbackValue(const CounterState());
+    registerFallbackValue(const HomeState.initial());
   });
 
   setUp(() async {
@@ -34,17 +31,16 @@ void main() {
     mockCounterCubit = MockCounterCubit();
 
     // Setup stubs for initial app state
-    when(() => mockHomeCubit.state).thenReturn(const HomeState());
-    when(
-      () => mockHomeCubit.stream,
-    ).thenAnswer((_) => const Stream<HomeState>.empty());
+    when(() => mockHomeCubit.state)
+        .thenReturn(const HomeState.loaded(welcomeMessage: ''));
+    when(() => mockHomeCubit.stream)
+        .thenAnswer((_) => const Stream<HomeState>.empty());
     when(() => mockHomeCubit.initialize()).thenAnswer((_) async {});
     when(() => mockHomeCubit.close()).thenAnswer((_) async {});
 
     when(() => mockCounterCubit.state).thenReturn(const CounterState());
-    when(
-      () => mockCounterCubit.stream,
-    ).thenAnswer((_) => const Stream<CounterState>.empty());
+    when(() => mockCounterCubit.stream)
+        .thenAnswer((_) => const Stream<CounterState>.empty());
     when(() => mockCounterCubit.close()).thenAnswer((_) async {});
 
     getIt.reset();

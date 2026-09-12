@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
@@ -47,25 +49,32 @@ void main() {
         verify(() => mockDataSource.getSettings()).called(1);
       });
 
-      test('returns Left(Failure) when datasource throws', () async {
-        when(
-          () => mockDataSource.getSettings(),
-        ).thenThrow(Exception('Storage error'));
+      test('maps unknown exceptions to Failure.unexpected', () async {
+        when(() => mockDataSource.getSettings())
+            .thenThrow(Exception('Storage error'));
 
         final Either<Failure, CounterSettings> result = await repository
             .getSettings();
 
         expect(result.isLeft(), true);
-        result.fold((Failure failure) {
-          expect(
-            failure.map(
-              serverError: (_) => true,
-              networkError: (_) => false,
-              unauthorized: (_) => false,
-            ),
-            true,
-          );
-        }, (_) => fail('Should not return Right'));
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.unexpected()),
+          (_) => fail('Should not return Right'),
+        );
+      });
+
+      test('maps timeouts to Failure.networkError', () async {
+        when(() => mockDataSource.getSettings())
+            .thenThrow(TimeoutException('too slow'));
+
+        final Either<Failure, CounterSettings> result = await repository
+            .getSettings();
+
+        expect(result.isLeft(), true);
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.networkError()),
+          (_) => fail('Should not return Right'),
+        );
       });
 
       test('maps DTO to domain correctly', () async {
@@ -97,27 +106,20 @@ void main() {
         verify(() => mockDataSource.saveSettings(any())).called(1);
       });
 
-      test('returns Left(Failure) when datasource throws', () async {
+      test('maps unknown exceptions to Failure.unexpected', () async {
         const CounterSettings settings = CounterSettings(stepSize: 2);
-        when(
-          () => mockDataSource.saveSettings(any()),
-        ).thenThrow(Exception('Save failed'));
+        when(() => mockDataSource.saveSettings(any()))
+            .thenThrow(Exception('Save failed'));
 
         final Either<Failure, void> result = await repository.saveSettings(
           settings,
         );
 
         expect(result.isLeft(), true);
-        result.fold((Failure failure) {
-          expect(
-            failure.map(
-              serverError: (_) => true,
-              networkError: (_) => false,
-              unauthorized: (_) => false,
-            ),
-            true,
-          );
-        }, (_) => fail('Should not return Right'));
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.unexpected()),
+          (_) => fail('Should not return Right'),
+        );
       });
 
       test('converts domain to DTO before saving', () async {

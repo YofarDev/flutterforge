@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+
 import '../../domain/models/home_data.dart';
 
 part 'home_data_dto.freezed.dart';

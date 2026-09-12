@@ -96,8 +96,15 @@ find_candidates() {
 filter_empty() {
   local -n _arr=$1      # nameref — modifies caller's array in-place
   local _clean=()
-  for _e in "${_arr[@]:-}"; do [[ -n "$_e" ]] && _clean+=("$_e"); done
-  _arr=("${_clean[@]:-}")
+  local _e
+  for _e in "${_arr[@]}"; do
+    [[ -n "$_e" ]] && _clean+=("$_e")
+  done
+  if (( ${#_clean[@]} )); then
+    _arr=("${_clean[@]}")
+  else
+    _arr=()
+  fi
 }
 
 # Apply a sed replacement safely via a temp file
@@ -156,11 +163,6 @@ while IFS= read -r line; do
     [[ -d "$TEST_DIR" ]] && SEARCH_DIRS+=("$TEST_DIR")
     mapfile -t CANDIDATES < <(find_candidates "$TARGET_BASENAME" "${SEARCH_DIRS[@]}")
     filter_empty CANDIDATES
-
-    # Filter out empty strings
-    REAL=()
-    for c in "${CANDIDATES[@]:-}"; do [[ -n "$c" ]] && REAL+=("$c"); done
-    CANDIDATES=("${REAL[@]:-}")
     COUNT=${#CANDIDATES[@]}
 
     if [[ $COUNT -eq 0 ]]; then
@@ -206,18 +208,11 @@ print(rel)
     filter_empty LIB_CANDIDATES
     filter_empty TEST_CANDIDATES
 
-    # Filter out empty strings
-    REAL_LIB=()
-    for c in "${LIB_CANDIDATES[@]:-}"; do [[ -n "$c" ]] && REAL_LIB+=("$c"); done
-    
-    REAL_TEST=()
-    for c in "${TEST_CANDIDATES[@]:-}"; do [[ -n "$c" ]] && REAL_TEST+=("$c"); done
-
     # Merge: lib/ results take priority; only add test/ results if lib/ empty
-    if [[ ${#REAL_LIB[@]} -gt 0 ]]; then
-      CANDIDATES=("${REAL_LIB[@]}")
+    if (( ${#LIB_CANDIDATES[@]} )); then
+      CANDIDATES=("${LIB_CANDIDATES[@]}")
     else
-      CANDIDATES=("${REAL_TEST[@]:-}")
+      CANDIDATES=("${TEST_CANDIDATES[@]}")
     fi
     COUNT=${#CANDIDATES[@]}
 

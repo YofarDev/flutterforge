@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+
 import '../../domain/models/counter_settings.dart';
 
 part 'counter_settings_dto.freezed.dart';

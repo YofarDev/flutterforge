@@ -32,9 +32,8 @@ void main() {
       getIt.registerFactory<CounterCubit>(() => mockCounterCubit);
 
       when(() => mockCounterCubit.state).thenReturn(const CounterState());
-      when(
-        () => mockCounterCubit.stream,
-      ).thenAnswer((_) => const Stream<CounterState>.empty());
+      when(() => mockCounterCubit.stream)
+          .thenAnswer((_) => const Stream<CounterState>.empty());
       when(() => mockCounterCubit.close()).thenAnswer((_) async {});
     });
 
@@ -88,14 +87,13 @@ void main() {
       when(() => mockCounterService.clampValue(any(), any())).thenAnswer(
         (Invocation invocation) => invocation.positionalArguments[0] as int,
       );
-      when(() => mockCounterService.applyStepSize(any(), any())).thenAnswer((
-        Invocation invocation,
-      ) {
-        final int val = invocation.positionalArguments[0] as int;
-        final CounterSettings settings =
-            invocation.positionalArguments[1] as CounterSettings;
-        return val + settings.stepSize;
-      });
+      when(() => mockCounterService.applyStepSize(any(), any()))
+          .thenAnswer((Invocation invocation) {
+            final int val = invocation.positionalArguments[0] as int;
+            final CounterSettings settings =
+                invocation.positionalArguments[1] as CounterSettings;
+            return val + settings.stepSize;
+          });
     });
 
     tearDown(() {

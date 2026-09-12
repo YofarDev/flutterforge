@@ -7,8 +7,6 @@
   "counterDescription": "Ceci est une fonctionnalité de démonstration qui peut être supprimée.",
   "counterIncrement": "Incrémenter",
   "counterDecrement": "Décrémenter",
-  "counterReset": "Réinitialiser",
-  "counterCount": "Compte",
   "commonLoading": "Chargement...",
   "commonError": "Une erreur s'est produite",
   "commonRetry": "Réessayer",
@@ -22,5 +20,11 @@
   "commonNext": "Suivant",
   "commonDone": "Terminé",
   "reset": "Réinitialiser",
-  "count": "Compte"
+  "count": "Compte",
+  "homeSubtitle": "Écran d'accueil",
+  "tryCounterDemo": "Essayer la démo du compteur",
+  "counterDemoDescription": "Une fonctionnalité de démo montrant la gestion d'état BLoC",
+  "errorTitle": "Erreur",
+  "pageNotFound": "Page introuvable",
+  "goHome": "Retour à l'accueil"
 }
