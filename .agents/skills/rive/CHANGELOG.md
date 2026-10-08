@@ -1,0 +1,17 @@
+# Changelog — SKILL.md edits only (date · change · verified CLI version)
+
+- 2026-09-16 · Initial skill distilled from live sessions (weather card, PTT
+  button v1-v3, toggle/script labs, spielg.riv reverse-engineering, director
+  rebuild + custom animation) · rive 1.0.3
+- 2026-09-16 · Added Evolution protocol (self-maintenance gate) · rive 1.0.3
+- 2026-09-17 · `--advance=N` renders frame N-1 (+loop-wrap proof recipe); shared artboard-level CubicEaseInterpolator via interpolatorId (no `name` attr); new rule 15: keyed-id contract for re-skins + nested Shapes ride keyed parent · rive 1.0.3
+2026-09-22 · Added 'Flutter runtime pairing' section (no RiveAnimation in rive-flutter 0.14; 0.13 can't load CLI 1.x .riv; rive_native:setup before flutter test) · rive CLI 1.1.0
+2026-09-22 · added keyed-TrimPath-inert rule (rive 1.1.0), SKILL.md rule 5
+- 2026-09-24 · Updated CLI 1.1.1 guidance: one-based JSON diagnostics, reverse-order module imports, pull overwrite behavior, auth and build-mode wording; refreshed CLI reference · rive 1.1.1
+- 2026-09-24 · Clarified multi-artboard Editor stage placement: set root Artboard x/y, leave child coordinates alone; verified identical LoaderLight screenshots with and without root offset · rive 1.1.1
+- 2026-09-26 · Re-verified on 1.2.0 (core loop, exit codes, screenshot/pointer intact); added publish=web instant-live trap + unpublish/--list-published; noted --fullscreen in release notes but absent from binary; CLI_REFERENCE §16 · rive 1.2.0
+- 2026-09-28 · Flutter runtime: VM trigger needs ViewModelInstanceTrigger in default instance; Feather needs Factory.rive; compressed reverse-engineering section into NOTES (budget) · rive 1.2.0 / rive-flutter 0.14.5
+- 2026-10-02 · 1.3.0: text-in-scripts rule reversed (NONE ≤1.2 only; 1.3.0 has context:font/Text:draw, docs luau/api/text); rule 8 SM boilerplate version-marked (Entry-only layer verifies green on 1.3.0, live); CLI_REFERENCE §17 + account-command rows (ls/workspace/open) + full 1.3.0 sample list · rive 1.3.0
+- 2026-10-08 · 1.4.0 re-verified live (core loop, exit ladder, JSON envelope, scaffold unchanged); added: rule-5 symbolic KeyedProperty names (+did-you-mean error), --touch/wheel/trackpad input + wheel no-op log, fetch/--allow-net, Luau generator return-annotation trap (green build, script never runs); Flutter section relocated to NOTES (budget) · rive 1.4.0
+- 2026-10-08 · Review pass: fixed build-mode contradiction (all capture flags are exclusive MODES; pointer/etc are MODIFIERS — §13 marked historical, --data-dump --once example annotated); added Quality & Completion Gate (3-tier: technical/behavioral/visual, contact sheets, loop-boundary proof) + milestone-based core loop; runtime-log check mandatory for scripted projects (gate + debug ladder); click-separator rule version-marked (1.4.0 listener→listener test pending); generator annotation generalized to all Scripted* protocols; XML listener patterns relocated to NOTES as SCHEMATIC; description trigger scoped to Rive; remote/destructive ops need user say-so · rive 1.4.0
+- 2026-10-08 · Second review: modifier fix (--data/--viewport/--fit are config, not capture-bound — viewport also sizes the live window); gate requires POSITIVE script-execution proof (observable effect, not absence-of-errors; logs.file append-only) + loop test qualified (pixel-identity only for deterministic loops); §15.x refs normalized to §15 item N; generator rule marked Layout-only live evidence, other protocols expected-untested · rive 1.4.0
