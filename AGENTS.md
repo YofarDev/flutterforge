@@ -34,5 +34,3 @@ Use jcodemunch MCP for:
 - In Claude Code, running `flutter analyze` first applies `dart fix --apply && dart format .` via a user-level PreToolUse hook. In other runtimes, run those two commands yourself before finishing.
 - `test/architecture_test.dart` enforces the layering rules (no cross-feature internals, presentation never imports data, no cubit-to-cubit fields). Keep it green and extend it when a rule is added to the skills.
 - Read skill `flutter-architecture` whenever you add a feature or refactor.
-
-@RTK.md
