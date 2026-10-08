@@ -1,16 +1,3 @@
-# General
-
-- Use mcp context7 to fetch up-to-date library documentation when needed.
-
-# Code Search
-
-Use jcodemunch MCP for:
-
-- Looking up any existing class, method, or function before writing new code
-- Exploring unfamiliar parts of the codebase
-- Searching for existing implementations before creating new ones
-- Getting file/folder outlines instead of reading whole files
-
 # Python
 
 - Always use `uv` instead of `python` for running Python scripts and managing packages
