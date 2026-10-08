@@ -83,35 +83,28 @@ void main(List<String> args) async {
     ]);
   }
 
-  // 6. Copy .claude folder
-  final claudeSource = Directory('${scriptDir.path}/.claude');
-  if (claudeSource.existsSync()) {
-    print('🤖 Copying \'.claude\' folder...');
-    _copyDirectory(claudeSource, Directory('.claude'));
-  }
-
-  // 7. Copy .codex folder
+  // 6. Copy .codex folder
   final codexSource = Directory('${scriptDir.path}/.codex');
   if (codexSource.existsSync()) {
     print('🤖 Copying \'.codex\' folder...');
     _copyDirectory(codexSource, Directory('.codex'));
   }
 
-  // 8. Copy .agents folder
+  // 7. Copy .agents folder
   final agentsSource = Directory('${scriptDir.path}/.agents');
   if (agentsSource.existsSync()) {
     print('🤖 Copying \'.agents\' folder...');
     _copyDirectory(agentsSource, Directory('.agents'));
   }
 
-  // 9. Copy AGENTS.md
+  // 8. Copy AGENTS.md
   final agentsInstructionsSource = File('${scriptDir.path}/AGENTS.md');
   if (agentsInstructionsSource.existsSync()) {
     print('🤖 Copying \'AGENTS.md\'...');
     agentsInstructionsSource.copySync('AGENTS.md');
   }
 
-  // 10. Copy remove_counter.sh
+  // 9. Copy remove_counter.sh
   final removeCounterSource = File('${scriptDir.path}/remove_counter.sh');
   if (removeCounterSource.existsSync()) {
     print('🧹 Copying \'remove_counter.sh\'...');
@@ -121,20 +114,20 @@ void main(List<String> args) async {
     }
   }
 
-  // 11. Copy analysis_options.yaml
+  // 10. Copy analysis_options.yaml
   print('⚙️  Copying \'analysis_options.yaml\'...');
   File(
     '${scriptDir.path}/analysis_options.yaml',
   ).copySync('analysis_options.yaml');
 
-  // 12. Copy l10n.yaml
+  // 11. Copy l10n.yaml
   final l10nSource = File('${scriptDir.path}/l10n.yaml');
   if (l10nSource.existsSync()) {
     print('🌐 Copying \'l10n.yaml\'...');
     l10nSource.copySync('l10n.yaml');
   }
 
-  // 13. Copy .gitignore template
+  // 12. Copy .gitignore template
   final gitignoreTemplate = File('${scriptDir.path}/template-gitignore');
   if (gitignoreTemplate.existsSync()) {
     print('📋 Updating \'.gitignore\'...');
@@ -145,7 +138,7 @@ void main(List<String> args) async {
     );
   }
 
-  // 14. Copy Inter font files
+  // 13. Copy Inter font files
   final fontSource = Directory('${scriptDir.path}/fonts');
   if (fontSource.existsSync()) {
     print('🔤 Setting up Inter font...');
@@ -154,7 +147,7 @@ void main(List<String> args) async {
     _copyDirectory(fontSource, fontDest);
   }
 
-  // 15. Process pubspec.yaml
+  // 14. Process pubspec.yaml
   print('🧹 Cleaning and configuring pubspec.yaml...');
   final pubspecFile = File('pubspec.yaml');
   var content = pubspecFile.readAsStringSync();
@@ -209,7 +202,7 @@ void main(List<String> args) async {
 
   pubspecFile.writeAsStringSync(content);
 
-  // 16. Add localization packages
+  // 15. Add localization packages
   print('🌐 Adding localization packages...');
   await _runCommand('flutter', [
     'pub',
@@ -219,7 +212,7 @@ void main(List<String> args) async {
   ]);
   await _runCommand('flutter', ['pub', 'add', 'intl:any']);
 
-  // 17. Add packages from packages_to_add.json
+  // 16. Add packages from packages_to_add.json
   final packagesFile = File('${scriptDir.path}/packages_to_add.json');
   if (packagesFile.existsSync()) {
     print('📦 Adding packages from packages_to_add.json...');
@@ -236,11 +229,11 @@ void main(List<String> args) async {
     }
   }
 
-  // 18. Generate localization files
+  // 17. Generate localization files
   print('🌐 Generating localization files...');
   await _runCommand('flutter', ['gen-l10n']);
 
-  // 19. Setup README.md
+  // 18. Setup README.md
   final readmeTemplate = File('${scriptDir.path}/template-README.md');
   if (readmeTemplate.existsSync()) {
     print('📄 Setting up README.md from template...');
@@ -251,13 +244,13 @@ void main(List<String> args) async {
     print('⚠️  Warning: template-README.md not found. Skipping README setup.');
   }
 
-  // 20. Replace placeholder package name
+  // 19. Replace placeholder package name
   print(
     '✏️  Replacing placeholder package name \'my_flutter_app\' with \'$projectName\'...',
   );
   _replaceInFiles(Directory.current, 'my_flutter_app', projectName);
 
-  // 21. Run build_runner
+  // 20. Run build_runner
   print('🔧 Running build_runner for code generation...');
   await _runCommand('dart', [
     'run',
@@ -266,13 +259,13 @@ void main(List<String> args) async {
     '--delete-conflicting-outputs',
   ]);
 
-  // 22. Smoke test: analyze + full test suite (architecture boundaries, DI)
+  // 21. Smoke test: analyze + full test suite (architecture boundaries, DI)
   print('🧪 Running fverify smoke test (analyze + tests)...');
   await _runCommand('bash', ['scripts/fverify.sh']);
 
   print('✅ Project setup complete!');
 
-  // 23. Open in VS Code
+  // 22. Open in VS Code
   if (openInVsCode) {
     print('📝 Opening project in VS Code...');
     try {

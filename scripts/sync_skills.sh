@@ -5,7 +5,6 @@
 # The canonical copy of every skill lives in <template>/.agents/skills/.
 # This script pushes it to every other location that expects a copy:
 #
-#   .claude/skills/    (Claude Code, project scope)
 #   .codex/skills/     (Codex — preserves Codex-only extras such as
 #                       RED_TEST_SCENARIOS.md and agents/openai.yaml)
 #   ~/.agents/skills/  (with --user)
@@ -51,7 +50,7 @@ while IFS= read -r d; do
   SKILLS+=("$(basename "$d")")
 done < <(find "$CANONICAL" -mindepth 1 -maxdepth 1 -type d | sort)
 
-declare -a TARGETS=("$TEMPLATE_ROOT/.claude/skills" "$TEMPLATE_ROOT/.codex/skills")
+declare -a TARGETS=("$TEMPLATE_ROOT/.codex/skills")
 if [[ "$USER_SCOPE" == true ]]; then
   TARGETS+=("$HOME/.agents/skills" "$HOME/.claude/skills")
 fi

@@ -75,7 +75,7 @@ These scripts are automatically copied to your project's `./scripts` folder:
 
 ### Agent Skills
 
-The template copies `.claude/`, `.codex/`, `.agents/`, and `AGENTS.md` so the same conventions are available across agent tools:
+The template copies `.codex/`, `.agents/`, and `AGENTS.md` so the same conventions are available across agent tools:
 
 - **flutter-architecture** - Enforces clean architecture, proper DI, file cohesion.
 - **flutter-testing** - Unit/widget test patterns with mocktail.

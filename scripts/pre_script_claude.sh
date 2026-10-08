@@ -15,7 +15,7 @@ fi
 
 echo "Syncing skills to user-level skill folders..."
 # .agents/skills is the single source of truth; sync_skills.sh propagates it
-# to .claude/, .codex/ and (with --user) ~/.agents/skills + ~/.claude/skills
+# to .codex/ and (with --user) ~/.agents/skills + ~/.claude/skills
 bash "$FLUTTERFORGE_ROOT/scripts/sync_skills.sh" --user
 
 echo "Done!"
