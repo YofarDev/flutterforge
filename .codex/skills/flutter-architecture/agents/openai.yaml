@@ -1,4 +1,0 @@
-interface:
-  display_name: "Flutter Architecture"
-  short_description: "Design and refactor scalable Flutter architecture"
-  default_prompt: "Create or refactor Flutter features to follow clean layered architecture with Cubit-first patterns."

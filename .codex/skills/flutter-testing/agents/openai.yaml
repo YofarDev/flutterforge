@@ -1,4 +1,0 @@
-interface:
-  display_name: "Flutter Testing"
-  short_description: "Write robust Flutter tests across layers"
-  default_prompt: "Write or improve Flutter tests with bloc_test, mocktail, and architecture-aware coverage."
