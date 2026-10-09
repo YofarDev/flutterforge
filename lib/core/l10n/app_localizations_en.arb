@@ -89,5 +89,8 @@
   "counterDemoDescription": "A demo feature showing BLoC state management",
   "errorTitle": "Error",
   "pageNotFound": "Page not found",
-  "goHome": "Go Home"
+  "goHome": "Go Home",
+  "failureNetwork": "Network error. Please check your connection.",
+  "failureUnauthorized": "You are not authorized.",
+  "failureServer": "A server error occurred. Please try again later."
 }

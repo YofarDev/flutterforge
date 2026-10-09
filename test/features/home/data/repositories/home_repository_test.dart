@@ -58,6 +58,35 @@ void main() {
         );
       });
 
+      test('maps a malformed date payload to Failure.unexpected', () async {
+        // FormatException is what DateTime.parse throws inside toDomain() for
+        // a malformed lastUpdated — the failure path of malformed DTO data.
+        when(() => mockDataSource.getHomeData())
+            .thenThrow(const FormatException('Invalid date format'));
+
+        final Either<Failure, HomeData> result = await repository.getHomeData();
+
+        expect(result.isLeft(), true);
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.unexpected()),
+          (_) => fail('Should not return Right'),
+        );
+      });
+
+      test('maps malformed JSON decoding to Failure.unexpected', () async {
+        // TypeError is what json_serializable decoding throws for a wrongly
+        // typed JSON field.
+        when(() => mockDataSource.getHomeData()).thenThrow(TypeError());
+
+        final Either<Failure, HomeData> result = await repository.getHomeData();
+
+        expect(result.isLeft(), true);
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.unexpected()),
+          (_) => fail('Should not return Right'),
+        );
+      });
+
       test('maps timeouts to Failure.networkError', () async {
         when(() => mockDataSource.getHomeData())
             .thenThrow(TimeoutException('timed out'));

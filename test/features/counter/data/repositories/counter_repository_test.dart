@@ -63,6 +63,22 @@ void main() {
         );
       });
 
+      test('maps malformed stored JSON to Failure.unexpected', () async {
+        // FormatException/TypeError from decoding a malformed payload must
+        // become a typed failure, never an escaped exception.
+        when(() => mockDataSource.getSettings())
+            .thenThrow(const FormatException('Malformed JSON'));
+
+        final Either<Failure, CounterSettings> result = await repository
+            .getSettings();
+
+        expect(result.isLeft(), true);
+        result.fold(
+          (Failure failure) => expect(failure, const Failure.unexpected()),
+          (_) => fail('Should not return Right'),
+        );
+      });
+
       test('maps timeouts to Failure.networkError', () async {
         when(() => mockDataSource.getSettings())
             .thenThrow(TimeoutException('too slow'));

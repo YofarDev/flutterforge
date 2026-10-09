@@ -65,7 +65,12 @@ fi
 SCAN_DIRS=("$LIB_DIR")
 [[ "$INCLUDE_TEST" == true ]] && [[ -d "$TEST_DIR" ]] && SCAN_DIRS+=("$TEST_DIR")
 
-mapfile -t DART_FILES < <(
+# Portable collection loop (no `mapfile`): the shipped helpers must run under
+# macOS's stock Bash 3.2 as well as modern Bash — see docs/compatibility.md.
+DART_FILES=()
+while IFS= read -r f; do
+  DART_FILES+=("$f")
+done < <(
   find "${SCAN_DIRS[@]}" -type f -name "*.dart" \
     ! -path "*/l10n/*" \
     ! -name "*.g.dart" \
@@ -78,10 +83,16 @@ log "Found ${#DART_FILES[@]} dart files to scan."
 echo ""
 
 # -- Scan (single Python pass; env carries the file list) ----------------------
-RESULTS="$(
-  DART_FILES="$(printf '%s\n' "${DART_FILES[@]}")" \
-  PROJECT_ROOT="$PROJECT_ROOT" \
-  uv run python << 'PYEOF'
+# The Python heredoc runs at TOP LEVEL with its output redirected to a temp
+# file. It must NOT sit inside a `$( )` command substitution: macOS's stock
+# Bash 3.2 fails to parse quoted heredocs inside command substitutions whose
+# body contains quotes or parentheses — see docs/compatibility.md.
+SCAN_OUTPUT="$(mktemp)"
+trap 'rm -f "$SCAN_OUTPUT"' EXIT
+
+DART_FILES="$(printf '%s\n' ${DART_FILES[@]+"${DART_FILES[@]}"})" \
+PROJECT_ROOT="$PROJECT_ROOT" \
+uv run python << 'PYEOF' > "$SCAN_OUTPUT"
 import os
 import re
 
@@ -185,7 +196,6 @@ for filepath in dart_files:
 for rel, lineno, value in findings:
     print(f"{rel}\t{lineno}\t{value}")
 PYEOF
-)"
 
 # -- Format and display results -----------------------------------------------
 TOTAL_FINDINGS=0
@@ -202,7 +212,7 @@ while IFS=$'\t' read -r filepath lineno value; do
 
   echo -e "    ${DIM}L${lineno}${RESET}  ${YELLOW}\"$value\"${RESET}"
 
-done <<< "$RESULTS"
+done < "$SCAN_OUTPUT"
 
 # -- Summary ------------------------------------------------------------------
 echo ""

@@ -3,9 +3,13 @@
 # sync_skills.sh — single source of truth for skill files.
 #
 # The canonical copy of every skill lives in <template>/.agents/skills/.
-# This script pushes it to every other location that expects a copy:
+# This script pushes it to the locations that expect a copy:
 #
-#   .codex/skills/     (Codex — preserves Codex-only extras such as
+#   .codex/skills/     (OPTIONAL target — Codex. Skipped, with a notice,
+#                       when the directory does not exist: .agents/skills/
+#                       is the single source of truth and .codex/skills/
+#                       is present only if you choose to keep a copy.
+#                       Preserves Codex-only extras such as
 #                       RED_TEST_SCENARIOS.md and agents/openai.yaml)
 #   ~/.agents/skills/  (with --user)
 #   ~/.claude/skills/  (with --user)
@@ -50,7 +54,7 @@ while IFS= read -r d; do
   SKILLS+=("$(basename "$d")")
 done < <(find "$CANONICAL" -mindepth 1 -maxdepth 1 -type d | sort)
 
-declare -a TARGETS=("$TEMPLATE_ROOT/.codex/skills")
+declare -a TARGETS=("$TEMPLATE_ROOT/.codex/skills")  # optional; skipped when absent
 if [[ "$USER_SCOPE" == true ]]; then
   TARGETS+=("$HOME/.agents/skills" "$HOME/.claude/skills")
 fi
@@ -89,16 +93,31 @@ for target in "${TARGETS[@]}"; do
   done
 done
 
+# Track which targets were present so the summary is honest about scope:
+# absent targets (e.g. a deliberately deleted .codex/skills/) are optional
+# and are skipped, not synchronized.
+declare -a PRESENT_TARGETS=()
+for target in "${TARGETS[@]}"; do
+  if [[ -d "$target" ]]; then
+    PRESENT_TARGETS+=("${target/#$HOME/~}")
+  fi
+done
+
 echo ""
 if [[ "$CHECK_ONLY" == true ]]; then
   if [[ "$DRIFT" -gt 0 ]]; then
     echo -e "${YELLOW}${BOLD}Drift detected: $DRIFT file(s) differ from .agents/skills${RESET}"
     exit 1
   fi
-  echo -e "${GREEN}All skill copies match .agents/skills${RESET}"
+  if [[ "${#PRESENT_TARGETS[@]}" -eq 0 ]]; then
+    echo -e "${GREEN}No sync targets present — nothing to check (targets are optional).${RESET}"
+  else
+    echo -e "${GREEN}All skill copies match .agents/skills (targets checked: ${PRESENT_TARGETS[*]})${RESET}"
+  fi
 else
-  echo -e "${GREEN}Synced $SYNCED file(s) from .agents/skills${RESET}"
-  echo -e "${DIM}Tip: run with --check in CI to catch drift, and --user to update the"
-  echo -e "     user-level copies (~/.agents/skills, ~/.claude/skills).${RESET}"
+  echo -e "${GREEN}Synced $SYNCED file(s) from .agents/skills (targets present: ${PRESENT_TARGETS[*]:-none})${RESET}"
+  echo -e "${DIM}Missing target directories are skipped — they are optional (canonical source:"
+  echo -e "     .agents/skills). Tip: run with --check in CI to catch drift, and --user to update"
+  echo -e "     the user-level copies (~/.agents/skills, ~/.claude/skills).${RESET}"
 fi
 echo ""

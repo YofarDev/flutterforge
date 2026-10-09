@@ -2,6 +2,12 @@
 
 This directory contains all tests for the Flutter application.
 
+> Note: the template repository itself has a separate generator test harness
+> (`tools/test_template.py`, run via `./scripts/verify_template.sh` at the
+> template root). It is not copied into generated applications; inside an app,
+> run `./scripts/fverify.sh` (format check + analyze + full test suite) before
+> finishing any change.
+
 ## Directory Structure
 
 The test directory mirrors the `lib/` structure for easy navigation:
@@ -27,9 +33,6 @@ test/
 │       ├── data/
 │       │   └── repositories/
 │       │       └── home_repository_test.dart
-│       ├── domain/
-│       │   └── services/
-│       │       └── home_service_test.dart
 │       └── presentation/
 │           └── screens/
 │               └── home_screen_test.dart
@@ -165,53 +168,63 @@ test('clamps value above maximum', () {
 - No cubit imports in service tests
 - Test every code path in the service
 
-### 5. Integration Tests
+### 5. Feature-Flow Tests (real components)
 
-Located in: `test/app_test.dart`
+Located in: `test/app_test.dart` (boot smoke) and
+`test/features/home/home_flow_test.dart` (cross-screen flows).
 
-These test the app as a whole, verifying navigation and end-to-end flows.
+These pump the real app — real DI composition, real router, real repositories,
+services and cubits — with only the data-source seams replaced by scripted
+fakes. They are widget tests of the in-process dependency chain and navigation,
+not device-level integration tests and not proof of a platform build.
 
 **What to test:**
 - App starts without errors
-- Navigation between screens works
-- Complete user flows
+- Navigation between screens with route-scoped state lifetimes
+- Failure → localized retry → success through the real repository mapping
+- Disposal with pending work in flight
 
 **Example:**
 ```dart
-testWidgets('app starts and shows home screen', (tester) async {
-  await tester.pumpWidget(const MyApp());
-  await tester.pumpAndSettle(const Duration(milliseconds: 600));
+testWidgets('loads home data from loading to success', (tester) async {
+  final GoRouter router = AppRouter.createRouter();
+  addTearDown(router.dispose);
+  await tester.pumpWidget(MyApp(router: router));
+  await tester.pumpAndSettle();
 
   expect(find.text('Home'), findsOneWidget);
 });
 ```
 
 **Best Practices:**
-- Wait for async initialization (e.g., `pumpAndSettle(Duration(milliseconds: 600))`)
-- Test critical user paths
+- Give each test a fresh router (`MyApp(router: AppRouter.createRouter())`)
+  and dispose it in teardown; never share a static router across tests
+- Control pending responses with `Completer`s — no timers, no network
+- Unmount the tree, dispose the router, and `await getIt.reset()` in teardown
 
 ### Integration Tests with Service Locator
 
-When testing the full app that uses GetIt service locator, you need to properly setup mocks:
+When testing with the GetIt service locator, prefer narrow data-source
+overrides over replacing cubits with mocks — the real repositories, services
+and cubits then run in the test:
 
 ```dart
 setUp(() async {
-  mockCubit = MockCubit();
-  
-  // Reset and setup service locator
-  getIt.reset();
-  await setupServiceLocator();
-  
-  // Unregister real implementations and register mocks
-  getIt.unregister<MyCubit>();
-  getIt.registerFactory<MyCubit>(() => mockCubit);
+  // Clear previous registrations (await it: reset disposes asynchronously).
+  await getIt.reset();
+  await setupServiceLocator(
+    homeRemoteDataSourceOverride: myScriptedFakeDataSource,
+  );
 });
 ```
 
 **Important:**
-- Always call `getIt.reset()` before `setupServiceLocator()` to clear previous registrations
-- Use `getIt.unregister<T>()` after setup to replace real implementations with mocks
-- Call `setupServiceLocator()` in `setUp()` (not `setUpAll()`) to avoid "Type already registered" errors
+- Always `await getIt.reset()` before `setupServiceLocator()` (and in
+  `tearDown()`) — it is an asynchronous disposal
+- Use the data-source override parameters of `setupServiceLocator()` for
+  real-component flow tests; do not re-register the whole graph in a test
+- Call `setupServiceLocator()` in `setUp()` (not `setUpAll()`) to avoid
+  "Type already registered" errors
 
 ## Running Tests
 
@@ -324,29 +337,37 @@ blocTest<HomeCubit, HomeState>(
   'emits loading then success',
   build: () => cubit,
   act: (cubit) => cubit.fetchData(),
-  wait: const Duration(milliseconds: 500),
   expect: () => [
-    const HomeState(isLoading: true),
-    const HomeState(isLoading: false, data: [...]),
+    const HomeState.loading(),
+    const HomeState.loaded(welcomeMessage: 'Welcome'),
   ],
 );
 ```
+
+Prefer controlling responses with `Completer`s over `wait:` timers — no real
+delays, deterministic ordering (see the feature-flow tests).
 
 ### Testing Error States
 ```dart
 blocTest<MyCubit, MyState>(
   'emits error state when fetch fails',
   build: () {
-    when(() => mockRepository.fetch()).thenThrow(Exception('Failed'));
+    when(() => mockRepository.fetch())
+        .thenAnswer((_) async => const Left(Failure.networkError()));
     return MyCubit(repository: mockRepository);
   },
   act: (cubit) => cubit.fetch(),
   expect: () => [
     const MyState(isLoading: true),
-    const MyState(isLoading: false, error: 'Failed'),
+    const MyState(isLoading: false, failure: Failure.networkError()),
   ],
 );
 ```
+
+States carry the typed `Failure`, not a message string: assert the failure
+category (`isA<FailureNetwork>()` or an equality on the variant). User-facing
+text is produced at build time by `localizeFailure()`; assert localized strings
+in widget tests, never diagnostic exception text.
 
 ### Testing with Mock Dependencies
 ```dart

@@ -5,9 +5,17 @@ concrete before/after corrections for the most common mistakes.
 
 ## Routing with go_router
 
+The app's router is created by a factory (`AppRouter.createRouter()`) so every
+consumer — `MyApp`, flow tests — gets a fresh, disposable `GoRouter`. `MyApp`
+takes the router as an injectable dependency; when none is supplied, its
+state creates one default instance, retains it across root rebuilds (a
+locale/theme change must never lose the current route), and disposes it when
+the widget's state ends. Injected routers stay owned by the caller.
+
 ```dart
 // lib/core/router/app_router.dart
-final router = GoRouter(
+class AppRouter {
+  static GoRouter createRouter() => GoRouter(
   routes: [
     GoRoute(path: '/', builder: (_, __) => const HomeScreen()),
     GoRoute(
@@ -22,26 +30,28 @@ final router = GoRouter(
     ),
   ],
   redirect: (_, state) {
-    final session = getIt<SessionService>();
-    final isAuthed = session.currentUser != null;
+    final SessionService session = getIt<SessionService>();
+    final bool isAuthed = session.currentUser != null;
     if (!isAuthed && state.uri.path != '/login') return '/login';
     return null;
   },
-);
+  );
+}
 ```
 
 ## Common Anti-Pattern Corrections
 
 ### Provide the cubit above the consumer
 ```dart
-// WRONG - same build context tries to consume immediately
+// WRONG - same build context tries to consume immediately (and feature code
+// must not resolve getIt anyway - receive a cubit/cubit factory instead)
 class MyScreen extends StatelessWidget {
   const MyScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => getIt<MyCubit>(),
+      create: (_) => myCubitFactory(), // constructor-injected factory
       child: Text(context.watch<MyCubit>().state.toString()),
     );
   }

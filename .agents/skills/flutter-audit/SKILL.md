@@ -156,7 +156,7 @@ Each phase must leave the app compiling and running. Never propose a big-bang re
 **Goal:** One registration source of truth, intentional provider scope.
 
 - [ ] Move manual dependency graph assembly into `service_locator.dart`
-- [ ] Keep `main.dart` as `runApp()` only; resolve app-wide providers from `getIt` in composition roots
+- [ ] Keep `main.dart` limited to bootstrap (`await setupServiceLocator()`) + `runApp(...)`; registrations live in `service_locator.dart` only and app-wide providers are resolved from `getIt` in the composition roots
 - [ ] Convert parameterized route cubits to `registerFactoryParam` or an explicit DI-backed factory
 - [ ] Re-scope feature cubits from app-wide to route/screen scope where appropriate
 

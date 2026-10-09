@@ -94,17 +94,15 @@ find_candidates() {
 }
 
 filter_empty() {
-  local -n _arr=$1      # nameref — modifies caller's array in-place
-  local _clean=()
+  # Portable on macOS's stock Bash 3.2 (no namerefs — see docs/compatibility.md):
+  # reads newline-separated values from stdin and leaves them in the global
+  # REPLY_CANDIDATES array (empty strings dropped).
+  REPLY_CANDIDATES=()
   local _e
-  for _e in "${_arr[@]}"; do
-    [[ -n "$_e" ]] && _clean+=("$_e")
+  while IFS= read -r _e; do
+    [[ -n "$_e" ]] && REPLY_CANDIDATES+=("$_e")
   done
-  if (( ${#_clean[@]} )); then
-    _arr=("${_clean[@]}")
-  else
-    _arr=()
-  fi
+  return 0
 }
 
 # Apply a sed replacement safely via a temp file
@@ -161,8 +159,9 @@ while IFS= read -r line; do
     # Search lib/ then test/
     SEARCH_DIRS=("$LIB_DIR")
     [[ -d "$TEST_DIR" ]] && SEARCH_DIRS+=("$TEST_DIR")
-    mapfile -t CANDIDATES < <(find_candidates "$TARGET_BASENAME" "${SEARCH_DIRS[@]}")
-    filter_empty CANDIDATES
+    CANDIDATES=()
+    filter_empty < <(find_candidates "$TARGET_BASENAME" "${SEARCH_DIRS[@]}")
+    CANDIDATES=(${REPLY_CANDIDATES[@]+"${REPLY_CANDIDATES[@]}"})
     COUNT=${#CANDIDATES[@]}
 
     if [[ $COUNT -eq 0 ]]; then
@@ -199,20 +198,22 @@ print(rel)
     fi
 
     # Search lib/ first, then test/ as fallback
-    mapfile -t LIB_CANDIDATES  < <(find_candidates "$TARGET_BASENAME" "$LIB_DIR")
-    mapfile -t TEST_CANDIDATES < <(
-      if [[ -d "$TEST_DIR" ]]; then
-        find_candidates "$TARGET_BASENAME" "$TEST_DIR"
-      fi
-    )
-    filter_empty LIB_CANDIDATES
-    filter_empty TEST_CANDIDATES
+    LIB_CANDIDATES=()
+    filter_empty < <(find_candidates "$TARGET_BASENAME" "$LIB_DIR")
+    LIB_CANDIDATES=(${REPLY_CANDIDATES[@]+"${REPLY_CANDIDATES[@]}"})
+    TEST_CANDIDATES=()
+    if [[ -d "$TEST_DIR" ]]; then
+      filter_empty < <(find_candidates "$TARGET_BASENAME" "$TEST_DIR")
+      TEST_CANDIDATES=(${REPLY_CANDIDATES[@]+"${REPLY_CANDIDATES[@]}"})
+    fi
 
     # Merge: lib/ results take priority; only add test/ results if lib/ empty
     if (( ${#LIB_CANDIDATES[@]} )); then
       CANDIDATES=("${LIB_CANDIDATES[@]}")
-    else
+    elif (( ${#TEST_CANDIDATES[@]} )); then
       CANDIDATES=("${TEST_CANDIDATES[@]}")
+    else
+      CANDIDATES=()
     fi
     COUNT=${#CANDIDATES[@]}
 

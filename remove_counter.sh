@@ -79,6 +79,10 @@ if os.path.exists(os.path.join(root, rel)):
         '\n',
         content,
     )
+    # The setupServiceLocator override parameter and its fallback line go too.
+    content = ''.join(
+        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
+    )
     write(rel, content)
     print('   ✓ DI registrations removed')
 
@@ -133,7 +137,90 @@ if os.path.exists(os.path.join(root, rel)):
     )
     write(rel, content)
     print('   ✓ DI smoke test cleaned up')
+
+# --- test/support/fake_counter_data_source.dart: pure counter fixture -----
+rel = 'test/support/fake_counter_data_source.dart'
+if os.path.exists(os.path.join(root, rel)):
+    os.remove(os.path.join(root, rel))
+    print('   ✓ Counter fake deleted')
+
+# --- home_flow_test.dart: drop counter tests/seams, keep home tests --------
+rel = 'test/features/home/home_flow_test.dart'
+if os.path.exists(os.path.join(root, rel)):
+    content = read(rel)
+
+    def remove_all_blocks(content, opener, marker):
+        """Removes EVERY balanced-parenthesis block opened by `opener` whose
+        body contains `marker` (plus its trailing comma)."""
+        while True:
+            search_from = 0
+            removed = False
+            while True:
+                start = content.find(opener, search_from)
+                if start == -1:
+                    break
+                depth = 0
+                i = content.find('(', start)
+                j = i
+                while j < len(content):
+                    if content[j] == '(':
+                        depth += 1
+                    elif content[j] == ')':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    j += 1
+                block = content[start:j + 1]
+                if marker in block:
+                    begin = content.rfind('\n', 0, start) + 1
+                    end = j + 1
+                    # Consume the statement/collection terminator (';' or
+                    # ',') plus the trailing newline, so no stray ';;'/';'
+                    # empty statements are left behind.
+                    while end < len(content) and content[end] in ',;':
+                        end += 1
+                    if end < len(content) and content[end] == '\n':
+                        end += 1
+                    content = content[:begin] + content[end:]
+                    removed = True
+                    break
+                search_from = j + 1
+            if not removed:
+                return content
+
+    # Drop every counter-specific testWidgets block as a whole.
+    content = remove_all_blocks(content, 'testWidgets(', 'ounter')
+    # configureApp loses its counter override parameter...
+    content = content.replace(
+        'Future<void> configureApp({ICounterLocalDataSource? counterOverride}) async {',
+        'Future<void> configureApp() async {',
+    )
+    # ...then any remaining line mentioning the counter (imports, fields,
+    # assignment lines, doc-comment lines).
+    content = ''.join(
+        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
+    )
+    write(rel, content)
+    print('   ✓ Home flow tests cleaned up')
 EOF
+
+# 3. Re-format the files edited above (surgical text edits are not
+#    formatter-exact; fverify's format gate is a CHECK, so the files this
+#    script touches are brought into compliance here).
+if command -v dart >/dev/null 2>&1; then
+    dart format \
+        lib/core/di/service_locator.dart \
+        lib/core/router/route_constants.dart \
+        lib/core/router/app_router.dart \
+        lib/features/home/presentation/screens/home_screen.dart \
+        test/app_test.dart \
+        test/core/di/service_locator_test.dart \
+        test/features/home/home_flow_test.dart >/dev/null \
+        || echo "   ⚠️  dart format reported an issue — fverify will surface it."
+    echo "   ✓ Edited files re-formatted"
+else
+    echo "   ⚠️  'dart' not found — run 'dart format .' before fverify."
+fi
 
 echo "✅ Counter feature removal complete!"
 echo "   Run ./scripts/fverify.sh (or fverify) to confirm everything still passes."

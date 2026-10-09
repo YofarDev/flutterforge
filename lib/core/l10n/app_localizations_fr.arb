@@ -26,5 +26,8 @@
   "counterDemoDescription": "Une fonctionnalité de démo montrant la gestion d'état BLoC",
   "errorTitle": "Erreur",
   "pageNotFound": "Page introuvable",
-  "goHome": "Retour à l'accueil"
+  "goHome": "Retour à l'accueil",
+  "failureNetwork": "Erreur réseau. Vérifiez votre connexion.",
+  "failureUnauthorized": "Vous n'êtes pas autorisé.",
+  "failureServer": "Une erreur de serveur est survenue. Réessayez plus tard."
 }

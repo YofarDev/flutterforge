@@ -2,22 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/l10n/failure_localization.dart';
 import '../../../../core/l10n/generated/app_localizations.dart';
+import '../../../../core/models/failure.dart';
 import '../../../../core/router/route_constants.dart';
 import '../bloc/home_cubit.dart';
 import '../bloc/home_state.dart';
 
+/// Single screen widget: it renders one load lifecycle and has no distinct
+/// sub-responsibility that would justify a separate View widget to forward
+/// to. The route provides the cubit; this screen is a pure consumer.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const HomeView();
-  }
-}
-
-class HomeView extends StatelessWidget {
-  const HomeView({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +26,7 @@ class HomeView extends StatelessWidget {
             loading: () => const Center(child: CircularProgressIndicator()),
             loaded: (String welcomeMessage) =>
                 HomeContent(welcomeMessage: welcomeMessage),
-            failure: (String message) => HomeError(message: message),
+            failure: (Failure failure) => HomeError(failure: failure),
           );
         },
       ),
@@ -47,13 +43,17 @@ class HomeContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
 
+    // Explicit presentation transformation: trim the raw message from the
+    // repository; an empty result falls back to the localized default.
+    final String trimmedMessage = welcomeMessage.trim();
+
     return SafeArea(
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              welcomeMessage.isNotEmpty ? welcomeMessage : l10n.homeWelcome,
+              trimmedMessage.isNotEmpty ? trimmedMessage : l10n.homeWelcome,
               style: Theme.of(context).textTheme.headlineMedium,
               textAlign: TextAlign.center,
             ),
@@ -80,9 +80,9 @@ class HomeContent extends StatelessWidget {
 }
 
 class HomeError extends StatelessWidget {
-  const HomeError({super.key, required this.message});
+  const HomeError({super.key, required this.failure});
 
-  final String message;
+  final Failure failure;
 
   @override
   Widget build(BuildContext context) {
@@ -93,7 +93,10 @@ class HomeError extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           Text(
-            message,
+            // Localized at build time from the failure category, so a locale
+            // change re-renders an existing error state. Diagnostic details
+            // carried by the failure are never displayed.
+            localizeFailure(l10n, failure),
             style: Theme.of(context).textTheme.bodyLarge,
             textAlign: TextAlign.center,
           ),

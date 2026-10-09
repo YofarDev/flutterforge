@@ -12,10 +12,10 @@ description: "Use when creating new Flutter features, refactoring existing Flutt
 | Features | Layers: `presentation/ → domain/ ← data/` |
 | State | **Cubit default**; use BLoC when explicit events or concurrency policies improve clarity |
 | State shape | **Union states** for load-lifecycle screens; **flat `copyWith` state** for persistent interactive state |
-| Listeners | **Always `MultiBlocListener`** — never nest |
+| Listeners | One listener → a single `BlocListener` is fine; multiple → flatten with `MultiBlocListener`, never nest |
 | Files | Split when a file has **more than one reason to change**, not by line count |
 | Models | `freezed` preferred; plain sealed immutable models/states are acceptable when exhaustive |
-| Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz); map unknown exceptions via `Failure.fromException` |
+| Errors | `Either<Failure, T>` from repos — use **`fpdart`** (not dartz); classify unknown exceptions via `mapExceptionToFailure` (`core/errors/exception_mapper.dart`) |
 | DI | `get_it` — registrations in `service_locator.dart`; resolve from app/route composition roots |
 | Cubit deps | **Cubits never depend on other cubits** — use domain services |
 
@@ -25,7 +25,7 @@ description: "Use when creating new Flutter features, refactoring existing Flutt
 
 ```
 lib/
-├── main.dart              # runApp() only — no wiring, no logic
+├── main.dart              # bootstrap (setupServiceLocator) + runApp — no other wiring
 ├── app.dart               # MaterialApp.router + app-scoped providers (reads getIt only)
 ├── core/
 │   ├── di/
@@ -51,6 +51,8 @@ lib/
 ```
 
 **Dependencies flow inward only:** `presentation → domain ← data`
+
+**Composition root:** `main.dart` performs bootstrap (`await setupServiceLocator()`) and then `runApp(...)` — it is not "runApp only". Dependency registration has exactly one owner: `service_locator.dart` (main.dart may import it solely to call the bootstrap). Resolving from `getIt` is additionally allowed in `app.dart`, `app_router.dart`, and `service_locator.dart` itself — that allowlist is exactly what `test/architecture_test.dart` enforces.
 
 `domain` owns business rules, entities, and repository contracts. `data` depends on `domain` to implement those contracts.
 
@@ -148,15 +150,17 @@ sealed class AuthState with _$AuthState {
   const factory AuthState.initial() = _Initial;
   const factory AuthState.loading() = _Loading;
   const factory AuthState.authenticated(User user) = _Authenticated;
-  const factory AuthState.failure(String message) = _Failure;
+  const factory AuthState.failure({required Failure failure}) = _Failure;
 }
 
-// Compiler enforces exhaustive handling
+// Compiler enforces exhaustive handling. The failure state carries the typed
+// Failure; the widget derives localized text with localizeFailure().
 state.when(
   initial: () => const LoginForm(),
   loading: () => const CircularProgressIndicator(),
   authenticated: (user) => HomeScreen(user: user),
-  failure: (msg) => ErrorBanner(message: msg),
+  failure: (failure) =>
+      ErrorBanner(message: localizeFailure(AppLocalizations.of(context), failure)),
 );
 ```
 
@@ -208,13 +212,18 @@ class SearchBloc extends Bloc<SearchEvent, SearchState> {
 ## Listener Pattern
 
 ```dart
-// ✅ Always flat — never nest BlocListeners
+// ✅ A single BlocListener is fine; when you have several, flatten them with
+//    MultiBlocListener — never nest BlocListeners
 MultiBlocListener(
   listeners: [
     BlocListener<AuthCubit, AuthState>(
       listener: (context, state) => state.whenOrNull(
         authenticated: (_) => context.push('/home'),
-        failure: (msg) => showErrorSnackBar(context, msg),
+        failure: (failure) => showErrorSnackBar(
+          context,
+          // Localize the typed failure; never show diagnostic messages.
+          localizeFailure(AppLocalizations.of(context), failure),
+        ),
       ),
     ),
     BlocListener<SettingsCubit, SettingsState>(
@@ -238,6 +247,8 @@ abstract class IAuthRepository {
 
 // data/repositories/auth_repository_impl.dart — implementation
 class AuthRepositoryImpl implements IAuthRepository {
+  AuthRepositoryImpl(this._api);
+
   final AuthApi _api;
 
   @override
@@ -246,15 +257,110 @@ class AuthRepositoryImpl implements IAuthRepository {
       final AuthDto dto = await _api.login(email: email, password: password);
       return Right<Failure, User>(dto.toDomain());
     } on ApiException catch (e) {
-      return Left<Failure, User>(Failure.serverError(message: e.message));
+      // KNOWN errors are classified deliberately, first: this repository
+      // knows its API's error taxonomy, so each variant maps to a specific
+      // Failure here — not in the generic mapper.
+      return Left<Failure, User>(_mapApiException(e));
     } catch (e, st) {
-      // Log the details, return a typed failure — never leak raw exception
-      // strings into UI-facing messages.
-      return Left<Failure, User>(Failure.fromException(e, stackTrace: st));
+      // Catch-all fallback: timeouts, malformed DTOs (FormatException,
+      // TypeError from toDomain()), anything this repository does not
+      // specifically know. Nothing escapes the Either<Failure, T> contract.
+      // `mapExceptionToFailure` classifies TimeoutException as
+      // Failure.networkError and everything else as Failure.unexpected, and
+      // logs error + stack trace exactly once at this boundary.
+      return Left<Failure, User>(
+        mapExceptionToFailure(e, stackTrace: st, tag: 'AuthRepository'),
+      );
     }
   }
+
+  Failure _mapApiException(ApiException e) => switch (e) {
+    ApiNotFoundException() => const Failure.unauthorized(),
+    ApiAuthException() => const Failure.unauthorized(),
+    _ => Failure.serverError(message: e.message), // diagnostic; logged only
+  };
 }
 ```
+
+**The repository error boundary is exhaustive by construction.** The known-type `catch` maps only the errors the repository deliberately classifies; the bare `catch` guarantees every other exception (timeout, malformed DTO, unexpected) becomes a typed `Failure` instead of escaping. Example tests:
+
+```dart
+// test/features/auth/data/repositories/auth_repository_impl_test.dart
+group('AuthRepositoryImpl.login error mapping', () {
+  test('a known API error maps to its specific failure variant', () async {
+    when(() => api.login(
+      email: any(named: 'email'),
+      password: any(named: 'password'),
+    )).thenThrow(const ApiAuthException(message: 'bad credentials'));
+
+    final Either<Failure, User> result =
+        await repository.login('a@b.c', 'wrong');
+
+    expect(
+      result.fold((l) => l, (_) => fail('expected Left')),
+      isA<FailureUnauthorized>(),
+    );
+  });
+
+  test('a timeout maps to Failure.networkError via the generic mapper', () async {
+    when(() => api.login(
+      email: any(named: 'email'),
+      password: any(named: 'password'),
+    )).thenThrow(TimeoutException('timeout', const Duration(seconds: 5)));
+
+    final Either<Failure, User> result =
+        await repository.login('a@b.c', 'pw');
+
+    expect(
+      result.fold((l) => l, (_) => fail('expected Left')),
+      isA<FailureNetwork>(),
+    );
+  });
+
+  test('a malformed DTO maps to Failure.unexpected instead of escaping', () async {
+    when(() => api.login(
+      email: any(named: 'email'),
+      password: any(named: 'password'),
+    )).thenAnswer(
+      // A syntactically valid response whose toDomain() conversion throws
+      // (e.g. DateTime.parse on 'not-a-date').
+      (_) async => const AuthDto(name: 'Ada', createdAt: 'not-a-date'),
+    );
+
+    final Either<Failure, User> result =
+        await repository.login('a@b.c', 'pw');
+
+    expect(
+      result.fold((l) => l, (_) => fail('expected Left')),
+      isA<FailureUnexpected>(),
+    );
+  });
+});
+```
+
+**Typed failures:** `Failure` is a pure immutable model (`serverError` with a diagnostic `message`, `networkError`, `unauthorized`, `unexpected`). Diagnostic messages are for logs/telemetry only — never displayed. Presentation text is derived at build time via `localizeFailure(AppLocalizations.of(context), failure)` in `core/l10n/failure_localization.dart`, which is exhaustive over the variants; the app follows the device locale (there is no locale-preference state).
+
+---
+
+## Async Lifecycle in Cubits (ordering, disposal, reset, streams)
+
+Reads use **latest-request-wins**: each accepted request captures a monotonically increasing request id before awaiting; after the await, the cubit re-checks the id (and `isClosed`) before emitting success *or* failure, so a slow older response can never overwrite a newer one. Note the limits:
+
+- **Ignoring a stale result is not cancelling the request.** The underlying network call still runs to completion; only its emission is discarded. True cancellation is a separate decision (e.g. a BLoC with `switchMap`, or a cancellable data-source API).
+- **Read ordering and write ordering are different decisions.** The counter deliberately has *no* ordered persistent-write queue: an increment that fails persistence keeps the optimistic in-memory value and falls back per its documented settings-failure policy. If your feature needs last-writer-wins on disk or serialized writes, say so explicitly in the cubit's doc comment and test it.
+- **Reset invalidation** uses a generation counter: bumping it on reset makes any in-flight result from before the reset drop its emission, so a reset cannot be undone by a late response.
+- **Disposal:** every emit after an `await` must be guarded by `isClosed` (emitting on a closed cubit throws a `StateError`). Cancel owned `StreamSubscription`s in `close()` and **await** the cancellation — it is asynchronous. Close owned `StreamController`s and `GoRouter` instances (tests dispose the router in teardown).
+
+---
+
+## Scaffolding Proportional to Complexity
+
+`fgen` generates a **lean** feature by default: freezed domain model (no JSON serialization), repository interface, placeholder data source (the external-I/O seam — it returns the domain model directly and is not a transport schema), repository implementation with typed failures, a cubit depending on the repository interface, union state, one screen, and tests. Add optional layers only when their criteria hold:
+
+- **`--with-dto`**: add a transport DTO when a *real* external representation exists (API payload, cache schema) that differs from the domain model.
+- **`--with-service`**: add a domain service when two or more cubits share rules, or the cubit accumulates coordination logic. The placeholder must grow real rules or be **removed** — a forwarding service is not mandatory architecture (compare `CounterService`, which owns real step/bounds behavior; `HomeCubit` correctly talks to `IHomeRepository` directly).
+
+After generation, register dependencies in `service_locator.dart`, add the route in `app_router.dart`, update the DI smoke test, then run `fverify`. A scaffold passing its unit tests is **not** a routed feature — compiling proves neither the route nor the DI registration; only wiring plus the flow tests do.
 
 ---
 
@@ -282,7 +388,12 @@ When a domain service needs to trigger UI state changes, the dependency arrow mu
 For event-like signals, the service can expose a stream and the cubit subscribes to it. For durable state, prefer a service or repository that exposes current state plus updates instead of a fire-and-forget event bus.
 
 ```dart
-// ✅ CORRECT — service owns the stream, knows nothing about cubits
+// ✅ CORRECT — service owns the stream, knows nothing about cubits.
+//
+// OWNERSHIP: the service's OWNER disposes the service — the composition
+// root that registered it (service_locator teardown / the owning object's
+// dispose), never a consumer cubit. The service is shared: a cubit closing
+// it would cut the stream for every other subscriber.
 class AvatarAnimationService {
   final _controller = StreamController<AvatarAnimation>.broadcast();
 
@@ -292,13 +403,15 @@ class AvatarAnimationService {
     _controller.add(animation);
   }
 
-  void dispose() => _controller.close();
+  // Asynchronous disposal returns Future<void> so the owner can await it.
+  Future<void> dispose() => _controller.close();
 }
 
-// Cubit subscribes — dependency flows inward
+// Cubit subscribes — dependency flows inward. The cubit owns ONLY its
+// subscription, never the shared service.
 class AvatarCubit extends Cubit<AvatarState> {
   final AvatarAnimationService _animationService;
-  late final StreamSubscription _sub;
+  late final StreamSubscription<AvatarAnimation> _sub;
 
   AvatarCubit(this._animationService) : super(const AvatarState.initial()) {
     _sub = _animationService.animations.listen(_onAnimation);
@@ -309,9 +422,12 @@ class AvatarCubit extends Cubit<AvatarState> {
   }
 
   @override
-  Future<void> close() {
-    _sub.cancel();
-    return super.close();
+  Future<void> close() async {
+    // Cancel only what this cubit owns: its subscription. Cancellation is
+    // asynchronous — await it before finishing teardown so no event fires
+    // into a closed cubit. Do NOT dispose the shared service here.
+    await _sub.cancel();
+    await super.close();
   }
 }
 ```
@@ -341,7 +457,7 @@ Use broadcast streams for ephemeral events such as animations, toasts, or one-of
 | ❌ Wrong | ✅ Fix |
 |---------|-------|
 | Navigate in `build()` | Use `BlocListener` |
-| Nested `BlocListener`s | Use `MultiBlocListener` |
+| Nested `BlocListener`s | Flatten several listeners with `MultiBlocListener` (a single `BlocListener` is fine) |
 | Services instantiated in widgets | Inject via `get_it` |
 | Cross-feature imports into internals | Depend on a public contract, shared module/package, or `core/` infrastructure |
 | Helper methods in widgets (`_buildX()`) | Extract only when the piece has a clear, standalone name and purpose; otherwise a small local helper is fine |
@@ -351,7 +467,7 @@ Use broadcast streams for ephemeral events such as animations, toasts, or one-of
 | Cubit depending on another cubit | Extract shared logic to domain service |
 | `context.read` after `await` | Capture reference before the `await` |
 | `try/catch` returning `null` | Return `Either<Failure, T>` |
-| Catch-all `Failure.serverError(message: e.toString())` | Map known exceptions to specific variants; route the rest through `Failure.fromException` |
+| Catch-all `Failure.serverError(message: e.toString())` | Classify known exceptions to specific variants and log once at the boundary via `mapExceptionToFailure`; never surface `e.toString()` in the UI |
 | Service holding a cubit ref (even via interface) | Publish domain events or durable domain state; cubit subscribes/reads |
 | Everything shared goes in `core/` | Keep `core/` for infrastructure; extract stable shared business logic into a dedicated module/package |
 
@@ -397,7 +513,21 @@ Signs a file does **not** need splitting:
 6. **Register dependencies in `service_locator.dart`** — keep registration and lifetimes in one place
 7. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope (the route builder provides the cubit; the screen is a pure consumer)
 8. **Add architecture tests** — repository mapping/failure tests, cubit/bloc state tests, and a DI smoke test for new registrations
-9. **Run `fverify`** (or `flutter analyze` + `flutter test`) before finishing — the architecture boundary tests fail on any rule violation
+9. **Run `fverify`** (format check + `flutter analyze` + `flutter test`) before finishing — the architecture checker enforces the rules listed below
+
+## Executable Rules vs Review Guidance
+
+`test/architecture_test.dart` uses an analyzer-based checker (`test/support/architecture_checker.dart`) that **fails closed** on resolution errors and enforces, on statically-visible imports and declarations:
+
+- dependencies flow inward (`presentation → domain ← data`)
+- domain purity (domain imports nothing from data/presentation)
+- cross-feature access via a feature's public barrel only (barrels re-export nothing internal)
+- `core/` never imports feature internals
+- no cubit/bloc stored as a field of another cubit/bloc/service (type-based)
+- `getIt` resolved only from the allowlist (`app.dart`, `service_locator.dart`, `app_router.dart`; `main.dart` may additionally *import* `service_locator.dart` for bootstrap)
+- registrations (`register*`) appear only in `service_locator.dart`
+
+**Scope limits (honest):** the checker sees only statically resolvable imports and declarations — dynamic coupling (e.g. a service receiving a cubit through an interface), naming quality, cubit sizing, listener nesting, rebuild scope, and singleton-vs-factory judgment are **review guidance**, not executable rules. A green suite proves the enforced rules only; it is not proof that "all architecture rules" hold. Negative fixtures (code that *should* fail the checker) are part of the contract — when you extend the checker with a rule from this skill, add the negative test alongside the positive one.
 
 ## Minimum Architecture Tests
 

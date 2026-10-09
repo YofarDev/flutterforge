@@ -1,5 +1,6 @@
 import 'package:fpdart/fpdart.dart';
 
+import '../../../../core/errors/exception_mapper.dart';
 import '../../../../core/models/failure.dart';
 import '../../domain/repositories/counter_repository.dart';
 import '../../domain/models/counter_settings.dart';
@@ -15,10 +16,11 @@ class CounterRepository implements ICounterRepository {
   Future<Either<Failure, CounterSettings>> getSettings() async {
     try {
       final CounterSettingsDto dto = await _dataSource.getSettings();
-      return Right<Failure, CounterSettings>(dto.toDomain());
+      final CounterSettings settings = dto.toDomain();
+      return Right<Failure, CounterSettings>(settings);
     } catch (e, st) {
       return Left<Failure, CounterSettings>(
-        Failure.fromException(e, stackTrace: st, tag: 'CounterRepository'),
+        mapExceptionToFailure(e, stackTrace: st, tag: 'CounterRepository'),
       );
     }
   }
@@ -31,7 +33,7 @@ class CounterRepository implements ICounterRepository {
       return const Right<Failure, void>(null);
     } catch (e, st) {
       return Left<Failure, void>(
-        Failure.fromException(e, stackTrace: st, tag: 'CounterRepository'),
+        mapExceptionToFailure(e, stackTrace: st, tag: 'CounterRepository'),
       );
     }
   }

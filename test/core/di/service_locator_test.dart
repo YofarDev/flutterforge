@@ -8,7 +8,6 @@ import 'package:my_flutter_app/features/counter/presentation/bloc/counter_cubit.
 import 'package:my_flutter_app/features/home/data/datasources/home_remote_datasource.dart';
 import 'package:my_flutter_app/features/home/data/repositories/home_repository_impl.dart';
 import 'package:my_flutter_app/features/home/domain/repositories/home_repository.dart';
-import 'package:my_flutter_app/features/home/domain/services/home_service.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
 
 /// DI smoke test — every registration must resolve. This catches wiring
@@ -29,7 +28,6 @@ void main() {
     expect(getIt<ICounterRepository>(), isA<CounterRepository>());
     expect(getIt<IHomeRepository>(), isA<HomeRepository>());
     expect(getIt<CounterService>(), isA<CounterService>());
-    expect(getIt<HomeService>(), isA<HomeService>());
   });
 
   test('cubits resolve as factories (fresh instances per request)', () async {

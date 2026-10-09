@@ -1,20 +1,25 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:my_flutter_app/core/models/failure.dart';
 import 'package:my_flutter_app/features/home/domain/models/home_data.dart';
-import 'package:my_flutter_app/features/home/domain/services/home_service.dart';
+import 'package:my_flutter_app/features/home/domain/repositories/home_repository.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_state.dart';
 
-class MockHomeService extends Mock implements HomeService {}
+class MockHomeRepository extends Mock implements IHomeRepository {}
 
 /// Tests for the HomeCubit.
 ///
 /// These verify the union-state lifecycle: loading, loaded, and — critically —
 /// that a repository failure becomes a visible failure state instead of being
-/// swallowed.
+/// swallowed. They also pin the deliberate async semantics: reads use
+/// latest-request-wins via a monotonic request identifier, nothing is emitted
+/// after close, and a stale (superseded) result — success or failure — is
+/// discarded instead of overwriting a newer request's state.
 void main() {
   setUpAll(() {
     registerFallbackValue(
@@ -24,11 +29,11 @@ void main() {
 
   group('HomeCubit', () {
     late HomeCubit homeCubit;
-    late MockHomeService mockHomeService;
+    late MockHomeRepository mockHomeRepository;
 
     setUp(() {
-      mockHomeService = MockHomeService();
-      homeCubit = HomeCubit(mockHomeService);
+      mockHomeRepository = MockHomeRepository();
+      homeCubit = HomeCubit(mockHomeRepository);
     });
 
     tearDown(() {
@@ -43,7 +48,7 @@ void main() {
       blocTest<HomeCubit, HomeState>(
         'emits [loading, loaded] when load succeeds',
         setUp: () {
-          when(() => mockHomeService.loadHomeData()).thenAnswer(
+          when(() => mockHomeRepository.getHomeData()).thenAnswer(
             (_) async => Right<Failure, HomeData>(
               HomeData(
                 welcomeMessage: 'Welcome to the app!',
@@ -51,8 +56,6 @@ void main() {
               ),
             ),
           );
-          when(() => mockHomeService.formatWelcomeMessage(any()))
-              .thenReturn('Welcome to the app!');
         },
         build: () => homeCubit,
         act: (HomeCubit cubit) => cubit.initialize(),
@@ -65,7 +68,7 @@ void main() {
       blocTest<HomeCubit, HomeState>(
         'emits [loading, failure] when load fails',
         setUp: () {
-          when(() => mockHomeService.loadHomeData()).thenAnswer(
+          when(() => mockHomeRepository.getHomeData()).thenAnswer(
             (_) async => const Left<Failure, HomeData>(Failure.networkError()),
           );
         },
@@ -73,7 +76,30 @@ void main() {
         act: (HomeCubit cubit) => cubit.initialize(),
         expect: () => <HomeState>[
           const HomeState.loading(),
-          const HomeState.failure(message: 'Network error occurred'),
+          const HomeState.failure(failure: Failure.networkError()),
+        ],
+      );
+
+      blocTest<HomeCubit, HomeState>(
+        'retains the failure category and its diagnostics in the state',
+        setUp: () {
+          when(() => mockHomeRepository.getHomeData()).thenAnswer(
+            (_) async => const Left<Failure, HomeData>(
+              // Diagnostics travel in state for logs/telemetry only; the UI
+              // renders the localized category instead.
+              Failure.serverError(message: 'diagnostic-internal-details'),
+            ),
+          );
+        },
+        build: () => homeCubit,
+        act: (HomeCubit cubit) => cubit.initialize(),
+        expect: () => <HomeState>[
+          const HomeState.loading(),
+          const HomeState.failure(
+            failure: Failure.serverError(
+              message: 'diagnostic-internal-details',
+            ),
+          ),
         ],
       );
     });
@@ -82,7 +108,7 @@ void main() {
       blocTest<HomeCubit, HomeState>(
         'reloads data from the loading state',
         setUp: () {
-          when(() => mockHomeService.loadHomeData()).thenAnswer(
+          when(() => mockHomeRepository.getHomeData()).thenAnswer(
             (_) async => Right<Failure, HomeData>(
               HomeData(
                 welcomeMessage: 'Refreshed!',
@@ -90,8 +116,6 @@ void main() {
               ),
             ),
           );
-          when(() => mockHomeService.formatWelcomeMessage(any()))
-              .thenReturn('Refreshed!');
         },
         build: () => homeCubit,
         seed: () => const HomeState.loaded(welcomeMessage: 'Stale'),
@@ -100,6 +124,162 @@ void main() {
           const HomeState.loading(),
           const HomeState.loaded(welcomeMessage: 'Refreshed!'),
         ],
+      );
+    });
+
+    group('async lifecycle', () {
+      Completer<Either<Failure, HomeData>> makeCompleter() =>
+          Completer<Either<Failure, HomeData>>();
+
+      Right<Failure, HomeData> success(String message) =>
+          Right<Failure, HomeData>(
+            HomeData(welcomeMessage: message, lastUpdated: DateTime(2024)),
+          );
+
+      test('a success completing after close does not emit or throw', () async {
+        final Completer<Either<Failure, HomeData>> completer = makeCompleter();
+        when(() => mockHomeRepository.getHomeData())
+            .thenAnswer((_) => completer.future);
+
+        final List<HomeState> emissions = <HomeState>[];
+        final StreamSubscription<HomeState> subscription = homeCubit.stream
+            .listen(emissions.add);
+
+        final Future<void> load = homeCubit.initialize();
+        await homeCubit.close();
+        completer.complete(success('Late'));
+
+        // Completing after close must not throw (emit on a closed cubit
+        // would) and must not emit.
+        await load;
+        // Flush the microtask queue so the broadcast state stream delivers
+        // queued emissions before the subscription is cancelled.
+        await Future<void>.delayed(Duration.zero);
+        await subscription.cancel();
+        expect(emissions, <HomeState>[const HomeState.loading()]);
+      });
+
+      test('a failure completing after close does not emit or throw', () async {
+        final Completer<Either<Failure, HomeData>> completer = makeCompleter();
+        when(() => mockHomeRepository.getHomeData())
+            .thenAnswer((_) => completer.future);
+
+        final List<HomeState> emissions = <HomeState>[];
+        final StreamSubscription<HomeState> subscription = homeCubit.stream
+            .listen(emissions.add);
+
+        final Future<void> load = homeCubit.initialize();
+        await homeCubit.close();
+        completer.complete(
+          const Left<Failure, HomeData>(Failure.networkError()),
+        );
+
+        await load;
+        // Flush the microtask queue so the broadcast state stream delivers
+        // queued emissions before the subscription is cancelled.
+        await Future<void>.delayed(Duration.zero);
+        await subscription.cancel();
+        expect(emissions, <HomeState>[const HomeState.loading()]);
+      });
+
+      test(
+        'two reads completed in reverse order retain the newer result',
+        () async {
+          final Completer<Either<Failure, HomeData>> first = makeCompleter();
+          final Completer<Either<Failure, HomeData>> second = makeCompleter();
+          int call = 0;
+          when(() => mockHomeRepository.getHomeData()).thenAnswer((_) {
+            call++;
+            return call == 1 ? first.future : second.future;
+          });
+
+          final List<HomeState> emissions = <HomeState>[];
+          final StreamSubscription<HomeState> subscription = homeCubit.stream
+              .listen(emissions.add);
+
+          final Future<void> firstLoad = homeCubit.initialize();
+          final Future<void> secondLoad = homeCubit.refresh();
+
+          // The newer request resolves first, then the stale older one.
+          second.complete(success('Newer'));
+          await secondLoad;
+          first.complete(success('Older'));
+          await firstLoad;
+
+          // Flush the microtask queue so the broadcast state stream delivers
+          // queued emissions before the subscription is cancelled.
+          await Future<void>.delayed(Duration.zero);
+          await subscription.cancel();
+          expect(
+            emissions.last,
+            const HomeState.loaded(welcomeMessage: 'Newer'),
+          );
+        },
+      );
+
+      test('a stale failure cannot overwrite a newer success', () async {
+        final Completer<Either<Failure, HomeData>> first = makeCompleter();
+        final Completer<Either<Failure, HomeData>> second = makeCompleter();
+        int call = 0;
+        when(() => mockHomeRepository.getHomeData()).thenAnswer((_) {
+          call++;
+          return call == 1 ? first.future : second.future;
+        });
+
+        final List<HomeState> emissions = <HomeState>[];
+        final StreamSubscription<HomeState> subscription = homeCubit.stream
+            .listen(emissions.add);
+
+        final Future<void> firstLoad = homeCubit.initialize();
+        final Future<void> secondLoad = homeCubit.refresh();
+
+        second.complete(success('Newer'));
+        await secondLoad;
+        first.complete(const Left<Failure, HomeData>(Failure.networkError()));
+        await firstLoad;
+
+        // Flush the microtask queue so the broadcast state stream delivers
+        // queued emissions before the subscription is cancelled.
+        await Future<void>.delayed(Duration.zero);
+        await subscription.cancel();
+        expect(
+          emissions.last,
+          isNot(const HomeState.failure(failure: Failure.networkError())),
+        );
+        expect(emissions.last, const HomeState.loaded(welcomeMessage: 'Newer'));
+      });
+
+      test(
+        'a failed current request is followed by a successful retry',
+        () async {
+          final Completer<Either<Failure, HomeData>> first = makeCompleter();
+          when(() => mockHomeRepository.getHomeData())
+              .thenAnswer((_) => first.future);
+
+          final List<HomeState> emissions = <HomeState>[];
+          final StreamSubscription<HomeState> subscription = homeCubit.stream
+              .listen(emissions.add);
+
+          final Future<void> failedLoad = homeCubit.initialize();
+          first.complete(const Left<Failure, HomeData>(Failure.networkError()));
+          await failedLoad;
+
+          // Retry: the new request becomes the current one and succeeds.
+          when(() => mockHomeRepository.getHomeData())
+              .thenAnswer((_) async => success('Retried'));
+          await homeCubit.refresh();
+
+          // Flush the microtask queue so the broadcast state stream delivers
+          // queued emissions before the subscription is cancelled.
+          await Future<void>.delayed(Duration.zero);
+          await subscription.cancel();
+          expect(emissions, <HomeState>[
+            const HomeState.loading(),
+            const HomeState.failure(failure: Failure.networkError()),
+            const HomeState.loading(),
+            const HomeState.loaded(welcomeMessage: 'Retried'),
+          ]);
+        },
       );
     });
   });

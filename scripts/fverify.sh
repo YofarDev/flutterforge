@@ -3,10 +3,17 @@
 # fverify.sh — one-command quality gate to run before finishing a change.
 #
 # Runs, in order:
-#   1. flutter analyze
-#   2. flutter test   (includes the architecture boundary + DI smoke tests)
+#   1. dart format --output=none --set-exit-if-changed .   (CHECK only —
+#      this script never rewrites files; run `dart format .` yourself to
+#      bring handwritten sources into compliance first)
+#   2. flutter analyze
+#   3. flutter test   (includes the architecture boundary + DI smoke tests)
 #
-# Exits non-zero if either step fails. Extra arguments are forwarded to
+# Codegen prerequisites: `flutter pub get`, `flutter gen-l10n` and
+# `dart run build_runner build --delete-conflicting-outputs` must already have
+# been run, or analysis will fail on missing generated parts.
+#
+# Exits non-zero if any step fails. Extra arguments are forwarded to
 # `flutter test` (e.g. `fverify.sh --update-coverage`).
 #
 # Usage:
@@ -35,6 +42,16 @@ cd "$PROJECT_ROOT"
 
 START_TS=$SECONDS
 
+# -- 1. Format check (non-mutating) ---------------------------------------------
+step "dart format check (non-mutating; run 'dart format .' to fix)"
+if dart format --output=none --set-exit-if-changed .; then
+  ok "formatting compliant"
+else
+  fail "dart format would change the files listed above."
+  fail "This gate never rewrites files — run 'dart format .' and commit the result."
+  exit 1
+fi
+
 # -- 1. Static analysis ---------------------------------------------------------
 step "flutter analyze"
 if flutter analyze --no-pub; then
@@ -56,6 +73,6 @@ fi
 ELAPSED=$((SECONDS - START_TS))
 echo ""
 echo -e "${BOLD}-- verify -----------------------------------------------------------${RESET}"
-echo -e "  ${GREEN}analyze ✓   test ✓   (${ELAPSED}s)${RESET}"
+echo -e "  ${GREEN}format ✓   analyze ✓   test ✓   (${ELAPSED}s)${RESET}"
 echo -e "  ${GREEN}Ready to finish.${RESET}"
 echo ""

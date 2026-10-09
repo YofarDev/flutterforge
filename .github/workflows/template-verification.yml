@@ -1,0 +1,105 @@
+# Template verification for the FlutterForge generator.
+#
+# This workflow proves the product this repository generates actually works:
+# it runs the two documented harness levels from tools/test_template.py
+# (see scripts/verify_template.sh and docs/compatibility.md).
+#
+# Lanes:
+#   * linux / pinned-baseline — Flutter 3.47.4 (the verified baseline).
+#   * linux / current-stable  — latest stable Flutter, to detect drift.
+#     An older pinned lane alone would not demonstrate latest-stable
+#     compatibility; this lane is labeled accordingly and is allowed to be
+#     the first to fail when upstream changes.
+#   * macos / pinned-baseline — generator + shell-script portability on
+#     macOS (stock Bash 3.2 contract; see docs/compatibility.md). If macOS
+#     runners are not available on this repository's plan, this lane fails
+#     at provisioning and must be reported, not removed.
+#
+# All jobs are read-only (permissions: contents: read). Logs and resolved
+# dependency metadata are uploaded when a job fails.
+
+name: template-verification
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: template-verification-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fast:
+    name: Fast generator tests (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (read-only)
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Install Flutter (pinned baseline — the fast tests run dart and flutter executables)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+
+      - name: Fast suite (refusals, parsing, staging, shell contract)
+        run: ./scripts/verify_template.sh
+
+  smoke:
+    name: Full smoke (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux, Flutter 3.47.4 baseline
+            os: ubuntu-latest
+            flutter-version: 3.47.4
+            channel: stable
+          - name: Linux, current stable
+            os: ubuntu-latest
+            flutter-version: ""
+            channel: stable
+          - name: macOS, Flutter 3.47.4 baseline
+            os: macos-latest
+            flutter-version: 3.47.4
+            channel: stable
+    steps:
+      - name: Checkout (read-only)
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+
+      - name: Install Flutter (${{ matrix.channel }}${{ matrix.flutter-version && format(' {0}', matrix.flutter-version) || '' }})
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+          flutter-version: ${{ matrix.flutter-version }}
+          cache: true
+
+      - name: Flutter doctor (record versions)
+        run: flutter doctor -v
+
+      - name: Full smoke suite
+        run: ./scripts/verify_template.sh --full --artifacts "$RUNNER_TEMP/smoke-artifacts"
+
+      - name: Upload logs and dependency metadata (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-artifacts-${{ matrix.os }}-${{ matrix.flutter-version || 'stable' }}
+          path: |
+            $RUNNER_TEMP/smoke-artifacts
+          if-no-files-found: warn
+          retention-days: 14

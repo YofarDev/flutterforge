@@ -107,18 +107,20 @@ test('maps API dto to domain user on success', () async {
   );
 });
 
-test('translates ApiException into Failure', () async {
+test('translates ApiException into a typed Failure', () async {
   when(() => mockApi.login(
     email: any(named: 'email'),
     password: any(named: 'password'),
   )).thenThrow(ApiException(message: 'Unauthorized'));
 
-  final result = await repo.login('user@ex.com', 'wrong');
+  final Either<Failure, User> result = await repo.login('user@ex.com', 'wrong');
 
   result.fold(
-    (failure) => expect(failure.message, 'Unauthorized'),
+    (failure) => expect(failure, isA<FailureUnauthorized>()),
     (_) => fail('Expected Left(Failure)'),
   );
+  // `Failure` has no user-facing message by design: assert the *category*,
+  // not a display string. Diagnostic fields are for logs only.
 });
 ```
 
@@ -177,19 +179,25 @@ testWidgets('shows error on failure', (tester) async {
     ),
   );
 
-  fakeCubit.pushState(const AuthState.failure('Error'));
+  fakeCubit.pushState(const AuthState.failure(failure: Failure.networkError()));
   await tester.pump();
 
-  expect(find.text('Error'), findsOneWidget);
+  // The screen localizes the typed failure at build time
+  // (localizeFailure(AppLocalizations.of(context), failure)); assert the
+  // localized text for the test locale, never a diagnostic message.
+  expect(find.text(l10n.failureNetwork), findsOneWidget);
 });
 ```
 
 ## Golden Test
 
-Uses the built-in `matchesGoldenFile` matcher — no extra package needed.
+Uses the plain `testWidgets` API with the built-in `matchesGoldenFile` matcher —
+no extra package is installed (there is no `testGoldens` from
+`flutter_test`; that API belongs to `alchemist`/`golden_toolkit`, which this
+template does not depend on).
 
 ```dart
-testGoldens('renders correctly', (tester) async {
+testWidgets('renders correctly', (tester) async {
   await tester.binding.setSurfaceSize(const Size(390, 844));
   addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -209,11 +217,29 @@ testGoldens('renders correctly', (tester) async {
 
 ## Architecture Boundary Tests
 
-The layering rules from `flutter-architecture` as executable gates: no cross-feature imports into
-`data/`/`presentation/`, presentation never imports `data/`, no cubit/bloc stored as a field,
-`core/` stays infrastructure-only outside composition roots. The template ships them at
-`test/architecture_test.dart` — run them with the rest of the suite, and extend the file whenever
-a rule is added to the skill. A rule that is not tested is a suggestion.
+The layering rules from `flutter-architecture` as executable gates, enforced by the analyzer-based
+checker in `test/support/architecture_checker.dart` (driven from `test/architecture_test.dart`,
+fail-closed on resolution errors): inward dependencies, domain purity, cross-feature access via
+public barrels only, `core` ↛ features, no cubit/bloc stored as a field, `getIt` resolved only from
+the composition-root allowlist, registrations only in `service_locator.dart`. The checker sees
+statically-visible imports and declarations only — dynamic coupling, sizing, naming, and rebuild
+scope remain review guidance, so a green run proves the enforced rules, not "all architecture".
+When you add a rule to the skill, extend the checker **and** add a negative fixture (code that
+must fail it); negative tests are part of the contract. A rule that is not tested is a suggestion.
+
+## Feature-Flow Tests (real components over fake I/O)
+
+Isolated tests (cubit, repository, service, widget-with-fake-cubit) mock their
+dependencies — that is correct there and "real repositories in tests are wrong"
+applies **only** to them. Feature-flow tests are the opposite by design: they
+pump the real dependency chain (real DI composition, real router, real
+repositories/services/cubits) and replace only the **data-source seam** with a
+scripted fake. Use the narrow data-source override parameters of
+`setupServiceLocator()` for this; do not re-register the whole graph. Each test
+gets a fresh router (`AppRouter.createRouter()`), disposes it in teardown, and
+`await getIt.reset()`. Flow tests are in-process widget tests of navigation and
+lifetimes — the naming does not claim device-level coverage. See
+`test/README.md` for the full patterns.
 
 ## DI Smoke Test
 
@@ -252,7 +278,7 @@ instead of at first navigation. The template ships it at
 | ❌ Wrong | ✅ Fix |
 |---------|-------|
 | Test private vars | Test public state + behavior |
-| Real repos in tests | Inject mocks/fakes via constructor |
+| Real repositories in *isolated* cubit tests | Mock the dependency via constructor — but see feature-flow tests below: real components over fake I/O are the correct choice there |
 | `pumpAndSettle()` everywhere | Prefer targeted `pump()` calls; use `pumpAndSettle()` only when you truly need it |
 | `state.runtimeType` | Use `isA<StateType>()` or assert a concrete state value |
 | Repository test only checks `isRight()` | Assert mapped value and failure translation |

@@ -11,9 +11,17 @@ import '../l10n/generated/app_localizations.dart';
 import 'route_constants.dart';
 
 class AppRouter {
-  AppRouter._();
+  const AppRouter._();
 
-  static final GoRouter router = GoRouter(
+  /// Builds a fully configured [GoRouter].
+  ///
+  /// A [GoRouter] owns navigator and route-matching state, so one instance is
+  /// needed per application instance: `MyApp` creates one by default, and
+  /// callers that need explicit ownership (tests) inject their own via
+  /// `MyApp(router: ...)` and dispose it when done. The router is deliberately
+  /// NOT a static singleton: statics are shared across tests, leak navigator
+  /// state between them, and cannot be disposed.
+  static GoRouter createRouter() => GoRouter(
     debugLogDiagnostics: true,
     routes: <RouteBase>[
       GoRoute(

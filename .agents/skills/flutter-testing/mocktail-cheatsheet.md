@@ -71,13 +71,13 @@ void main() {
       'emits [loading, failure] on repository error',
       build: () {
         when(() => mockRepo.login(any(), any()))
-            .thenAnswer((_) async => Left(Failure('Invalid credentials')));
+            .thenAnswer((_) async => const Left(Failure.unauthorized()));
         return cubit;
       },
       act: (c) => c.login('a@b.com', 'wrong'),
       expect: () => [
         const AuthState.loading(),
-        const AuthState.failure('Invalid credentials'),
+        const AuthState.failure(failure: Failure.unauthorized()),
       ],
     );
   });
@@ -118,16 +118,18 @@ void main() {
       );
     });
 
-    test('returns Left(Failure) on API exception', () async {
+    test('returns a typed Left(Failure) on API exception', () async {
       when(() => mockApi.login(
         email: any(named: 'email'),
         password: any(named: 'password'),
       )).thenThrow(ApiException(statusCode: 401, message: 'Unauthorized'));
 
-      final result = await repo.login('a@b.com', 'wrong');
+      final Either<Failure, User> result = await repo.login('a@b.com', 'wrong');
 
       result.fold(
-        (failure) => expect(failure.message, 'Unauthorized'),
+        // Assert the failure *category*; Failure carries no user-facing
+        // message by design (diagnostics are for logs only).
+        (failure) => expect(failure, isA<FailureUnauthorized>()),
         (_) => fail('Expected Left(Failure)'),
       );
     });
@@ -147,20 +149,28 @@ void main() {
       when(() => mockCubit.state).thenReturn(const AuthState.initial());
       whenListen(
         mockCubit,
-        Stream.fromIterable([const AuthState.failure('Invalid credentials')]),
+        Stream.fromIterable(
+          [const AuthState.failure(failure: Failure.unauthorized())],
+        ),
         initialState: const AuthState.initial(),
       );
 
       await tester.pumpWidget(
         BlocProvider<AuthCubit>.value(
           value: mockCubit,
-          child: const MaterialApp(home: Scaffold(body: LoginForm())),
+          // Localized failure text comes from localizeFailure(); assert the
+          // localized string for the test locale, never a diagnostic message.
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: const Scaffold(body: LoginForm()),
+          ),
         ),
       );
 
       await tester.pump();
 
-      expect(find.text('Invalid credentials'), findsOneWidget);
+      expect(find.text(l10n.failureUnauthorized), findsOneWidget);
     });
 
     testWidgets('calls cubit.login on form submit', (tester) async {
@@ -226,9 +236,12 @@ void main() {
 
 ### Golden Test
 
+Uses `testWidgets` with the built-in `matchesGoldenFile` matcher (no extra
+package — `flutter_test` has no `testGoldens`).
+
 ```dart
 void main() {
-  testGoldens('LoginScreen renders correctly', (tester) async {
+  testWidgets('LoginScreen renders correctly', (tester) async {
     final mockCubit = MockAuthCubit();
     when(() => mockCubit.state).thenReturn(const AuthState.initial());
 

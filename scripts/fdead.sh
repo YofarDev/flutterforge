@@ -66,9 +66,12 @@ log "Project root: $PROJECT_ROOT"
 SCAN_DIRS=("$LIB_DIR")
 [[ "$INCLUDE_TEST" == true ]] && [[ -d "$TEST_DIR" ]] && SCAN_DIRS+=("$TEST_DIR")
 
-mapfile -t ALL_DART_FILES < <(
-  find "${SCAN_DIRS[@]}" -type f -name "*.dart" | sort
-)
+# Portable collection loop (no `mapfile`): the shipped helpers must run under
+# macOS's stock Bash 3.2 as well as modern Bash — see docs/compatibility.md.
+ALL_DART_FILES=()
+while IFS= read -r f; do
+  ALL_DART_FILES+=("$f")
+done < <(find "${SCAN_DIRS[@]}" -type f -name "*.dart" | sort)
 
 # -- Step 2: collect all import/export statements across the whole project ----
 SEARCH_DIRS=("$LIB_DIR")
@@ -84,11 +87,15 @@ ALL_REFERENCES=$(
 )
 
 # -- Step 3: collect all files exported via barrel files ----------------------
-mapfile -t BARREL_EXPORTS < <(
+# Portable collection loop (no `mapfile`) — see the Bash contract above.
+BARREL_EXPORTS=()
+while IFS= read -r export_path; do
+  BARREL_EXPORTS+=("$export_path")
+done < <(
   grep -rh "^export ['\"]" "${SCAN_DIRS[@]}" --include="*.dart" 2>/dev/null \
-  | grep -oE "['\"][^'\"]+\.dart['\"]" \
-  | tr -d "'\"" \
-  || true
+    | grep -oE "['\"][^'\"]+\.dart['\"]" \
+    | tr -d "'\"" \
+    || true
 )
 
 is_barrel_exported() {
@@ -103,7 +110,7 @@ is_barrel_exported() {
 DEAD_FILES=()
 SKIPPED=0
 
-for filepath in "${ALL_DART_FILES[@]}"; do
+for filepath in ${ALL_DART_FILES[@]+"${ALL_DART_FILES[@]}"}; do
   filename=$(basename "$filepath")
   rel="${filepath#$PROJECT_ROOT/}"
 
