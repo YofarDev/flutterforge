@@ -45,6 +45,9 @@ mkdir -p "$DOWNLOADS_DIR"
 PUBSPEC_FILE="pubspec.yaml"
 [ -f "$PUBSPEC_FILE" ] || error_exit "$PUBSPEC_FILE not found. Run from a Flutter project root."
 
+PROJECT_NAME=$(grep -E "^name:" "$PUBSPEC_FILE" | head -1 | sed 's/^name:[[:space:]]*//' | tr -d '[:space:]')
+[ -z "$PROJECT_NAME" ] && error_exit "Could not read 'name:' from $PUBSPEC_FILE."
+
 VERSION_LINE=$(grep -E "^version:" "$PUBSPEC_FILE" | head -1)
 [ -z "$VERSION_LINE" ] && error_exit "No top-level 'version:' line found in $PUBSPEC_FILE."
 
@@ -65,28 +68,34 @@ grep -q "^$NEW_VERSION_LINE\$" "$PUBSPEC_FILE" || \
     error_exit "Version line did not update as expected — check pubspec.yaml manually."
 
 # -- 2. Build and collect artifacts --------------------------------------------
+# Artifacts are named <project>-<version>+<build>-<platform>.<ext>. Existing
+# destination files are NEVER silently overwritten — the build is refused.
 collect_artifact() {
-    local dir="$1" pattern="$2" label="$3"
-    local file
+    local dir="$1" pattern="$2" platform="$3" ext="$4"
+    local file target
     file=$(find "$dir" -name "$pattern" -print -quit 2>/dev/null || true)
     if [ -f "$file" ]; then
-        echo "Moving $label to $DOWNLOADS_DIR/"
-        mv "$file" "$DOWNLOADS_DIR/" || error_exit "Failed to move $label."
+        target="$DOWNLOADS_DIR/${PROJECT_NAME}-${VERSION}+${NEW_BUILD_NUMBER}-${platform}.${ext}"
+        if [ -e "$target" ]; then
+            error_exit "Refusing to overwrite existing artifact: $target — remove or rename it first."
+        fi
+        echo "Moving $platform artifact to $target"
+        mv "$file" "$target" || error_exit "Failed to move $platform artifact."
     else
-        echo "Warning: $label not found under $dir"
+        echo "Warning: $platform artifact not found under $dir"
     fi
 }
 
 if [ "$BUILD_ANDROID" = true ]; then
     echo "Building App Bundle..."
     flutter build appbundle || error_exit "flutter build appbundle failed."
-    collect_artifact "build/app/outputs/bundle/release/" "*.aab" "App Bundle"
+    collect_artifact "build/app/outputs/bundle/release/" "*.aab" android aab
 fi
 
 if [ "$BUILD_IOS" = true ]; then
     echo "Building IPA..."
     flutter build ipa || error_exit "flutter build ipa failed."
-    collect_artifact "build/ios/ipa/" "*.ipa" "IPA"
+    collect_artifact "build/ios/ipa/" "*.ipa" ios ipa
 fi
 
 echo "Build script finished successfully."

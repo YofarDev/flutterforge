@@ -58,8 +58,12 @@ if [ ! -f "$EN_FILE" ]; then
     exit 1
 fi
 
-# Validate + add the key to both files in one pass. Nothing is written unless
-# both files parse and the placeholder sets of FR/EN match.
+# Validate + add the key to both files. Nothing is written unless both files
+# parse as strict JSON (no trailing commas, no duplicate keys), both roots are
+# JSON objects, the key is absent from BOTH files, and the placeholder sets of
+# FR/EN match. Each destination is then replaced from a staged temp file
+# beside it — the two replacements are not a single atomic transaction, but a
+# failure during preparation leaves both files untouched.
 export ARB_FR_FILE="$FR_FILE"
 export ARB_EN_FILE="$EN_FILE"
 export ARB_KEY="$KEY_NAME"
@@ -72,6 +76,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 
 fr_file = os.environ['ARB_FR_FILE']
 en_file = os.environ['ARB_EN_FILE']
@@ -98,29 +103,78 @@ if placeholders(fr_value) != placeholders(en_value):
         f"    EN: {placeholders(en_value) or 'none'}"
     )
 
-def read(path):
+class DuplicateKeyError(Exception):
+    pass
+
+def reject_constant(value):
+    raise ValueError(f"Non-JSON numeric constant: {value}")
+
+def _object_pairs(pairs):
+    result = {}
+    for k, v in pairs:
+        if k in result:
+            raise DuplicateKeyError(k)
+        result[k] = v
+    return result
+
+def load(path):
+    """Strict JSON parse: values preserved verbatim, duplicate keys rejected
+    so reserialization can never silently discard a translation."""
     with open(path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    # Remove trailing commas (common in Dart, invalid in strict JSON)
-    content = re.sub(r',(\s*[}\]])', r'\1', content)
+        try:
+            return json.load(f, object_pairs_hook=_object_pairs,
+                             parse_constant=reject_constant)
+        except DuplicateKeyError as e:
+            fail(f"Duplicate JSON key '{e.args[0]}' in {path}.\n"
+                 f"Fix the file manually, then retry.")
+        except json.JSONDecodeError as e:
+            fail(f"JSON Decode Error in {path}: {e}\nFix the file manually, then retry.")
+        except ValueError as e:
+            fail(f"Invalid JSON in {path}: {e}\nFix the file manually, then retry.")
+
+def serialize(path, data):
+    """Serialize to a staged temp file beside the destination; returns its path."""
+    directory = os.path.dirname(path)
+    fd, temp_path = tempfile.mkstemp(
+        prefix=os.path.basename(path) + '.tmp-', dir=directory
+    )
     try:
-        return json.loads(content)
-    except json.JSONDecodeError as e:
-        fail(f"JSON Decode Error in {path}: {e}\nFix the file manually, then retry.")
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, allow_nan=False)
+            f.write('\n')
+    except Exception:
+        os.unlink(temp_path)
+        raise
+    return temp_path
 
-fr_data = read(fr_file)
-en_data = read(en_file)
+# Validate BOTH files before writing either.
+fr_data = load(fr_file)
+en_data = load(en_file)
 
+for path, data in ((fr_file, fr_data), (en_file, en_data)):
+    if not isinstance(data, dict):
+        fail(f"Root of {path} is not a JSON object.")
+
+if key in fr_data:
+    fail(f"Key '{key}' already exists in {os.path.basename(fr_file)}.")
 if key in en_data:
     fail(f"Key '{key}' already exists in {os.path.basename(en_file)}.")
 
+# Insertion order: keep every existing entry (values and @key metadata) and
+# append the new key.
 fr_data[key] = fr_value
 en_data[key] = en_value
 
-for path, data in ((fr_file, fr_data), (en_file, en_data)):
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write('\n')
+fr_tmp = serialize(fr_file, fr_data)
+try:
+    en_tmp = serialize(en_file, en_data)
+except Exception:
+    os.unlink(fr_tmp)
+    raise
+
+# Both serializations succeeded — replace the destinations.
+os.replace(fr_tmp, fr_file)
+os.replace(en_tmp, en_file)
 
 print(f"    FR: {fr_value}")
 print(f"    EN: {en_value}")

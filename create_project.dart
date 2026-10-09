@@ -127,11 +127,68 @@ const List<String> placeholderRoots = <String>[
 const List<String> requiredTemplatePaths = <String>[
   'lib',
   'test',
-  'scripts',
   'analysis_options.yaml',
   'packages_to_add.json',
   'l10n.yaml',
   'template-gitignore',
+  'templates/github/workflows/flutter-ci.yml',
+  ...shippedScripts,
+  ...shippedScriptAssets,
+];
+
+/// The scripts explicitly shipped to generated applications, by template path
+/// under `scripts/`. Copying is ALLOWLIST-BASED: an arbitrary new file added
+/// to the template's `scripts/` directory does NOT automatically ship — it
+/// must be added here.
+///
+/// Categories (see README.md "Shipped tooling"):
+/// - standard app tools: `fverify`, `fgen`, `fstr`, `fl10n`;
+/// - included advisory/optional tools: `fanal`, repaired `fimp`, advisory
+///   `fdead`, `fcheck`, explicit `sync_skills`.
+///
+/// Template-maintenance tooling (`verify_template.sh`, `tools/test_template.py`)
+/// and personal automation (moved to the template repository's
+/// `personal_tools/` — `fbuild.sh`, `pre_script_claude.sh`) are deliberately
+/// NOT shipped: generated apps must be self-contained with no template or
+/// personal-tooling dependencies. The retired
+/// `flutter_analyze_interceptor.py` was deleted from the template.
+const List<String> shippedScripts = <String>[
+  'scripts/fverify.sh',
+  'scripts/fgen.sh',
+  'scripts/fstr.sh',
+  'scripts/fl10n.sh',
+  'scripts/fanal.sh',
+  'scripts/fimp.sh',
+  'scripts/fdead.sh',
+  'scripts/fcheck.sh',
+  'scripts/sync_skills.sh',
+];
+
+/// Supporting files shipped with app scripts, also explicitly allowlisted.
+const List<String> shippedScriptAssets = <String>[
+  'scripts/fimp.py',
+  'scripts/render_feature.py',
+  'scripts/feature_templates/domain_model.dart.tpl',
+  'scripts/feature_templates/repository_contract.dart.tpl',
+  'scripts/feature_templates/domain_service.dart.tpl',
+  'scripts/feature_templates/remote_datasource.dart.tpl',
+  'scripts/feature_templates/dto.dart.tpl',
+  'scripts/feature_templates/repository_impl_imports.dart.tpl',
+  'scripts/feature_templates/repository_impl_dto_import.dart.tpl',
+  'scripts/feature_templates/repository_impl_body.dart.tpl',
+  'scripts/feature_templates/state.dart.tpl',
+  'scripts/feature_templates/cubit.dart.tpl',
+  'scripts/feature_templates/screen.dart.tpl',
+  'scripts/feature_templates/repository_test_imports.dart.tpl',
+  'scripts/feature_templates/repository_test_dto_import.dart.tpl',
+  'scripts/feature_templates/repository_test_setup.dart.tpl',
+  'scripts/feature_templates/repository_test_dto_result.dart.tpl',
+  'scripts/feature_templates/repository_test_domain_result.dart.tpl',
+  'scripts/feature_templates/repository_test_body.dart.tpl',
+  'scripts/feature_templates/dto_test.dart.tpl',
+  'scripts/feature_templates/service_test.dart.tpl',
+  'scripts/feature_templates/cubit_test.dart.tpl',
+  'scripts/feature_templates/screen_test.dart.tpl',
 ];
 
 final RegExp packageNamePattern = RegExp(r'^[a-z][a-z0-9_]*$');
@@ -635,22 +692,28 @@ Future<void> copyTemplateAssets(String templateRoot) async {
   }
   copyDirectory(Directory('$templateRoot/test'), testDestination);
 
-  stdout.writeln("📜 Copying 'scripts' folder from template...");
+  stdout.writeln('📜 Copying shipped scripts (explicit allowlist)...');
   final Directory scriptsDestination = Directory('scripts');
   if (!scriptsDestination.existsSync()) {
     scriptsDestination.createSync();
   }
-  copyDirectory(Directory('$templateRoot/scripts'), scriptsDestination);
+  for (final String scriptPath in <String>[
+    ...shippedScripts,
+    ...shippedScriptAssets,
+  ]) {
+    final File source = File('$templateRoot/$scriptPath');
+    if (!source.existsSync()) {
+      throw FailureException(
+        'Template asset missing: $scriptPath — the shipped-script allowlist '
+        'and the template repository are out of sync.',
+      );
+    }
+    File(scriptPath).parent.createSync(recursive: true);
+    source.copySync(scriptPath);
+  }
 
   if (!Platform.isWindows) {
-    await runCommand('chmod', <String>[
-      '+x',
-      ...Directory('scripts')
-          .listSync()
-          .whereType<File>()
-          .map((File file) => file.path)
-          .where((String path) => path.endsWith('.sh')),
-    ]);
+    await runCommand('chmod', <String>['+x', ...shippedScripts]);
   }
 
   final Directory codexSource = Directory('$templateRoot/.codex');
@@ -682,6 +745,14 @@ Future<void> copyTemplateAssets(String templateRoot) async {
 
   stdout.writeln("⚙️  Copying 'analysis_options.yaml'...");
   File('$templateRoot/analysis_options.yaml').copySync('analysis_options.yaml');
+
+  // The generated app carries its OWN standalone quality workflow — never a
+  // reference to this repository's template-verification harness.
+  stdout.writeln("🤖 Copying '.github/workflows/flutter-ci.yml'...");
+  final Directory workflowDestination = Directory('.github/workflows');
+  workflowDestination.createSync(recursive: true);
+  File('$templateRoot/templates/github/workflows/flutter-ci.yml')
+      .copySync('${workflowDestination.path}/flutter-ci.yml');
 
   final File l10nSource = File('$templateRoot/l10n.yaml');
   if (l10nSource.existsSync()) {

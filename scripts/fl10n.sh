@@ -10,8 +10,8 @@
 #   - Logger/tag strings (AppLogger calls, `tag:` arguments)
 #   - Interpolated strings starting with ${
 #   - Route paths (/...), asset paths, URLs, emails, hex colours
-#   - ANSI escape literals, snake_case/lowercase identifiers, PascalCase
-#     class-like words, SCREAMING_SNAKE_CASE, pure numbers, single chars
+#   - ANSI escape literals, snake_case/lowercase identifiers,
+#     SCREAMING_SNAKE_CASE, pure numbers, single chars
 #   - Strings inside throw/assert/RegExp/Uri contexts
 #
 # Usage:
@@ -122,7 +122,6 @@ SKIP_LINE_PATTERNS = [
 
 # Match source-text escape forms: \x1B[0m and \u001B[0m (literal backslash text)
 ANSI_LITERAL = re.compile(r"(?:\\x1[Bb]|\\u001[Bb])\[[0-9;]*[A-Za-z]")
-PASCAL_CASE = re.compile(r"[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)*\Z")
 
 def should_skip_value(s):
     if not s or len(s) <= 1:
@@ -133,8 +132,6 @@ def should_skip_value(s):
         return True                            # pure number
     if re.fullmatch(r"[a-z0-9_.]+", s):
         return True                            # lowercase identifier/key
-    if PASCAL_CASE.fullmatch(s):
-        return True                            # class-like word (tags, names)
     if re.fullmatch(r"[A-Z0-9_]+", s):
         return True                            # SCREAMING_SNAKE_CASE
     if s.startswith("/"):

@@ -1,6 +1,21 @@
-# flutter_template
+# {PROJECT_NAME}
 
 A modern Flutter application built with Clean Architecture.
+
+## Working with Agents
+
+Start with [AGENTS.md](AGENTS.md), then consult [CLI Tools](#cli-tools) before
+choosing a script. Commands below run from this app's root and work without
+personal shell aliases. Use the tool relevant to the task; advisory scans are
+review aids, not mandatory steps for every change.
+
+Project-local skills live in `.agents/skills/`: read
+[flutter-architecture](.agents/skills/flutter-architecture/SKILL.md) for features
+and refactors, [flutter-testing](.agents/skills/flutter-testing/SKILL.md) for
+tests, [flutter-audit](.agents/skills/flutter-audit/SKILL.md) for deep reviews,
+and [flutter-bloc-provider](.agents/skills/flutter-bloc-provider/SKILL.md) for
+provider errors and dialog/sheet provider boundaries. Edit this canonical
+directory when maintaining skills; use the sync tool only if you keep copies.
 
 ## Architecture
 
@@ -44,18 +59,31 @@ lib/
 
 ## CLI Tools
 
-The following utility scripts are available in the `scripts/` folder:
+The following utility scripts are included in this app. Run them from the app
+root. Bash and Flutter/Dart must be on `PATH`; `fgen`, `fstr`, `fl10n`, `fimp`,
+and `remove_counter.sh` also require [uv](https://docs.astral.sh/uv/).
 
 | Script | Purpose |
 |--------|---------|
 | `./scripts/fverify.sh` | **Quality Gate** (non-mutating): `dart format` check (never rewrites files — run `dart format .` yourself first), then `flutter analyze` + `flutter test` in one command. Run before finishing any change. |
 | `./scripts/fgen.sh "name" [--with-service] [--with-dto]` | **Generate New Feature**: Creates Clean Architecture boilerplate (lean by default; optional layers via flags) and runs code generation. Refuses to overwrite an existing feature; snake_case or camelCase names. |
-| `./scripts/fstr.sh "key" "FR" "EN"` | **Add Localization**: Adds a new key to both French and English `.arb` files. |
+| `./scripts/fstr.sh "key" "FR" "EN" [project_path]` | **Add Localization**: Adds a new key to both French and English `.arb` files, then regenerates localization. Requires a new lowerCamelCase key, valid ARB JSON, and matching placeholders. Defaults to the current project. |
 | `./scripts/fl10n.sh` | **Find Unlocalized Strings**: Scans `lib/` for hardcoded user-facing strings that should use `AppLocalizations`. |
-| `./scripts/fanal.sh` | **Audit**: Generates a code quality and architecture report. |
-| `./scripts/fdead.sh` | **Dead Code**: Identifies unused files in the project. |
-| `./scripts/fimp.sh` | **Fix Imports**: Repairs broken imports after files are moved or renamed. |
-| `./scripts/sync_skills.sh` | **Sync Skills**: Pushes `.agents/skills` (canonical) to project targets that exist — `.codex/skills/` (optional; skipped when absent) — and, with `--user`, the user-level skill folders. `--check` reports drift across present targets only. |
+| `./scripts/fanal.sh [project_path]` | **Audit**: Writes or overwrites `flutter_analysis.md` in the selected project (defaults to the current directory). Heuristic findings guide source review; they do not establish architecture violations. |
+| `./scripts/fdead.sh` | **Potentially Unreferenced Files** (advisory only): reports files whose basename appears in no import/export/part statement. Never deletes anything — the textual scan cannot prove deletion is safe (conditional directives, custom entry points, and filename collisions can affect findings), so review every finding manually. |
+| `./scripts/fimp.sh` / `./scripts/fimp.sh --apply` | **Fix Imports** (preview-first): with no flags, displays proposed repairs and writes nothing; `--apply` repairs unambiguous broken imports, then re-runs analysis and reports failure without rollback. Never repairs a `lib/` import into `test/`, and never gives a test helper a `package:` URI. |
+| `./scripts/fcheck.sh [package_name]` | **Dependency Inventory** (review aid): compares dependencies with direct imports, or lists imports of one package. Results do not establish that a dependency is removable; inspect exports, indirect usage, code generation, assets and platform channels. |
+| `./scripts/sync_skills.sh [--check] [--user]` | **Sync Skills**: Copies canonical top-level Markdown files from `.agents/skills` into matching skill directories in existing `.codex/skills/` targets. Missing target/skill directories are skipped and extras are retained. `--check` writes nothing and exits nonzero on drift. `--user` also targets existing `~/.agents/skills/` and `~/.claude/skills/` copies; use when user-level synchronization is requested. |
+| `./remove_counter.sh` | **Remove Counter Demo**: Deletes the Counter feature and rewrites its demo wiring/tests. For freshly generated apps with the untouched example; see [Removing Example Code](#removing-example-code). |
+
+The read-only scans (`fl10n`, `fdead`, `fcheck`, import preview, and skill drift
+check) require judgment before acting on their output. `fanal` writes a report;
+`fgen`, `fstr`, import apply, skill sync, and Counter removal modify files.
+
+`scripts/fimp.py`, `scripts/render_feature.py`, and `scripts/feature_templates/`
+are supporting assets used by the shell entry points. FlutterForge's
+`scripts/verify_template.sh`, `tools/test_template.py`, and `personal_tools/`
+are template-maintenance tools and are not shipped into this app.
 
 ## Development Commands
 
@@ -74,9 +102,43 @@ flutter test
 
 # Run the app
 flutter run
+
+# Prepare explicitly before finishing a change
+dart fix --apply
+dart format .
+./scripts/fverify.sh
 ```
 
-> The `fstr`, `fl10n`, and `fimp` scripts require [uv](https://docs.astral.sh/uv/) on your PATH.
+Resolve dependencies and regenerate localization/Freezed/JSON code above when
+needed before verification. The gate checks formatting, analyzes, and runs
+tests; it does not fix source or generate missing code. Any failed step exits
+nonzero and must be resolved before finishing.
+
+`fimp` edits static URI tokens in the library header, preserving comments,
+strings, prefixes and combinators. It supports relative imports in both `lib/`
+and `test/`, including conditional branches. Unsupported forms (such as
+annotated directives or URI literals with hex/Unicode escapes) are reported
+without edits. Preview is advisory; `--apply` exits nonzero when analysis fails
+or a repair remains ambiguous, unresolved or unsupported. Candidate matching
+uses filenames, so review every proposal before applying it.
+
+Feature source templates live in `scripts/feature_templates/`; `fgen` renders
+them with explicit values through `scripts/render_feature.py`, without shell
+evaluation. Keep these assets alongside the scripts when sharing the tooling.
+
+## Continuous Integration
+
+`.github/workflows/flutter-ci.yml` runs on pull requests and pushes to `main`.
+It installs the documented Flutter baseline, resolves packages, regenerates
+localizations and Freezed/JSON code, then runs `scripts/fverify.sh`. CI checks
+formatting and does not fix or reformat committed source. No secrets or signing
+credentials are needed.
+
+If your default branch has another name, update the push branch filter. To make
+the quality gate mandatory for merges, configure branch protection or a ruleset
+to require the `format check + analyze + test` check. The workflow file alone
+does not enforce merge protection. The template workflow has been exercised
+locally; confirm its first GitHub Actions run in your own repository.
 
 ## Adding a New Feature
 
@@ -132,7 +194,7 @@ After generation, follow the steps the script prints: register the dependencies 
 update `test/core/di/service_locator_test.dart`, and replace the placeholder data
 source with real I/O. Note that a scaffold passing its unit tests is not a routed
 feature — it appears in the app only after the DI and route steps are applied, so
-run `fverify` after wiring.
+run `dart fix --apply`, `dart format .`, and `./scripts/fverify.sh` after wiring.
 
 Features generated with the previous full layout keep working as-is; no
 migration is required.
@@ -149,8 +211,17 @@ migration is required.
 
 ## Removing Example Code
 
-If this project was just created, you can remove the example Counter feature by running:
+When starting a freshly generated app, remove the untouched Counter example
+if you do not need it:
 
 ```bash
 ./remove_counter.sh
+dart fix --apply
+dart format .
+./scripts/fverify.sh
 ```
+
+The removal script deletes Counter source/tests and updates DI, routes, Home
+navigation, and related tests. Review the diff; if you have customized the demo
+or its wiring, remove those references manually instead of relying on its
+template-specific text edits.

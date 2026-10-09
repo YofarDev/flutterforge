@@ -42,6 +42,12 @@ Your new project is automatically configured with:
 - Inter font
 - Example counter feature
 
+For agent-assisted development, start with the generated `AGENTS.md` and its
+README's **CLI Tools** section. The generated README comes from
+[template-README.md](template-README.md#cli-tools); it documents the complete
+app tool catalogue, prerequisites, file effects, and verification sequence.
+Use repository-local commands rather than assuming personal shell aliases.
+
 ---
 
 ## Generator CLI contract (`create_project.dart`)
@@ -105,17 +111,51 @@ Additional rules:
 
 These scripts are automatically copied to your project's `./scripts` folder:
 
+Run app tools from a generated application's root. Bash and Flutter/Dart must
+be on `PATH`; `fgen`, `fstr`, `fl10n`, `fimp`, and the separate Counter removal
+script also require `uv`.
+
 | Script                                         | Purpose                                               |
 | ---------------------------------------------- | ----------------------------------------------------- |
+| `./scripts/fverify.sh` | Check formatting, analyze, and run tests before finishing an app change. Run `dart fix --apply` and `dart format .` explicitly first; resolve dependencies and regenerate code when needed. The gate never fixes source. |
 | `./scripts/fgen.sh "feature_name" [--with-service] [--with-dto]` | Generate new feature boilerplate (lean Clean Architecture by default; `--with-service` adds a placeholder domain service, `--with-dto` adds a transport DTO). Refuses to overwrite an existing feature. |
-| `./scripts/fanal.sh`                         | Generate code audit report for LLM review             |
-| `./scripts/fbuild.sh`                        | Build AAB + IPA, auto-increment version               |
-| `./scripts/fstr.sh "key" "French" "English"` | Add localization string                               |
-| `./scripts/fdead.sh`                         | Find orphaned (unused) files                          |
-| `./scripts/fdead.sh --clean-dead`            | Delete orphaned files                                 |
-| `./scripts/fimp.sh`                          | Auto-fix broken imports                               |
-| `./scripts/fcheck.sh "pattern"`              | Search code in lib/                                   |
+| `./scripts/fanal.sh [project_path]`          | Write or overwrite `flutter_analysis.md` with heuristic audit leads for source review. Defaults to the current project. |
+| `./scripts/fstr.sh "key" "French" "English" [project_path]` | Add a new localization key to both ARB files and regenerate localization; placeholders must match. |
+| `./scripts/fdead.sh`                         | Report potentially unreferenced files (advisory only; never deletes — findings require manual review) |
+| `./scripts/fimp.sh`                          | Preview proposed import repairs (writes nothing). `--apply` repairs unambiguous broken imports, then re-runs analysis; verification failure is reported and edits retained. |
+| `./scripts/fcheck.sh [package_name]`         | Inventory dependencies or list one package's direct imports (review aid only; inspect exports, indirect usage, code generation, assets and platform channels before changing dependencies) |
 | `./scripts/fl10n.sh`                         | Find hardcoded user-facing strings needing l10n      |
+| `./scripts/sync_skills.sh [--check] [--user]` | Check drift without writing (`--check`), or copy canonical skill Markdown into matching existing optional targets. `--user` additionally targets user-level copies when requested; missing directories are skipped and extras retained. |
+
+The generator also copies `./remove_counter.sh` to the app root. It deletes
+the untouched Counter demo and updates its wiring/tests; use it only for a
+freshly generated app when removing that example. Review the diff and run the
+app gate afterward. See [the generated app reference](template-README.md#cli-tools)
+for detailed tool constraints and failure behavior.
+
+**Shipped tooling is an explicit allowlist.** The generator copies only the
+scripts and support assets listed in `shippedScripts` and `shippedScriptAssets`
+(in `create_project.dart`) — a new file
+dropped into the template's `scripts/` directory does not automatically ship
+into generated apps. `verify_template.sh` and `tools/test_template.py` are
+template-maintenance tools and stay repository-only. Personal automation
+(`fbuild.sh`, `pre_script_claude.sh`) lives in the template repository's
+`personal_tools/` directory and is never installed into generated apps.
+
+`fimp` supports static library-header URI tokens, relative imports in both
+source trees and conditional branches. It preserves comments and reports
+unsupported forms without editing them. Preview remains advisory; `--apply`
+returns nonzero if analysis or any proposed repair remains unsuccessful.
+
+`fgen` source templates are separate files in `scripts/feature_templates/`.
+The standard-library renderer `scripts/render_feature.py` substitutes explicit
+values without evaluating shell expressions. Every support file is allowlisted
+and validated before project creation.
+
+Generated apps also receive `.github/workflows/flutter-ci.yml`: localization
+and Freezed/JSON generation precede the quality gate. Their README explains the
+push branch filter and how to require the check through branch protection.
+Remote workflow execution must be confirmed in each application's repository.
 
 ### Agent Skills
 
@@ -128,6 +168,11 @@ The template copies `.agents/` (the canonical skill source) and `AGENTS.md` into
 - **prepare-context** - Exports project files as `.txt` into a flat folder (`context-export/`) for external AI tools.
 
 These instructions are available immediately in generated projects instead of recreating them by hand.
+
+`AGENTS.md` directs agents to the complete app command catalogue, maps tasks to
+project-local skills, and distinguishes app verification from this template
+repository's gate. Skills cover development practices; the README is the
+detailed script reference.
 
 ---
 
@@ -206,7 +251,7 @@ Generation contract:
   exists (symlinks included) — an existing feature is never partially
   overwritten.
 - Files are rendered into a temporary directory and published only after
-  validation. Screen localization keys are added via `fstr` (with a
+  validation. Screen localization keys are added via `./scripts/fstr.sh` (with a
   key-collision check); if that or `build_runner` fails, the published feature
   is kept and the script exits non-zero.
 
@@ -214,17 +259,22 @@ After running the script, follow the printed instructions to register your new
 classes in `lib/core/di/service_locator.dart` and add the route in
 `lib/core/router/app_router.dart`. A scaffold passing its unit tests is not a
 routed feature — it appears in the app only after the DI and route steps are
-applied, so run `fverify` after wiring. Features generated with the previous
+applied, so run `dart fix --apply`, `dart format .`, and `./scripts/fverify.sh`
+after wiring. Features generated with the previous
 full layout keep working as-is; no migration is required.
 
 ---
 
 ## Removing Example Code
 
-After creating a new project, you can delete the demo features to start fresh with a single command:
+From a freshly generated app, remove the untouched Counter demo if you do not
+need it:
 
 ```bash
 ./remove_counter.sh
+dart fix --apply
+dart format .
+./scripts/fverify.sh
 ```
 
 This will automatically:
@@ -235,9 +285,14 @@ This will automatically:
 - Clean up navigation references in the Home screen.
 - Update integration tests in `app_test.dart`.
 
+Review the diff afterward. For customized Counter code or wiring, remove the
+references manually rather than relying on the template-specific text edits.
+
 ---
 
 ## Development Commands
+
+These commands run inside a generated app, which has a `pubspec.yaml`:
 
 ```bash
 flutter pub get                    # Install dependencies
@@ -245,7 +300,9 @@ flutter gen-l10n                  # Generate localization
 dart run build_runner build --delete-conflicting-outputs # Generate freezed models
 flutter analyze                   # Lint code
 flutter test                     # Run tests
-dart format .                    # Format code
+dart fix --apply                 # Apply available source fixes before the gate
+dart format .                    # Format after applying fixes
+./scripts/fverify.sh             # Format check + analyze + tests
 ```
 
 ---

@@ -122,6 +122,16 @@ if os.path.exists(path):
 rel = 'test/app_test.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
+    # The router-rebuild test asserts state retention through the counter's
+    # Increment control, so it cannot survive feature removal — drop the
+    # whole test case, not just its counter-flavored lines.
+    content = re.sub(
+        r"\s*testWidgets\(\s*'rebuilding the root widget retains the route "
+        r"and state of the '\s*'default-owned router'.*?\}\);\n",
+        '\n',
+        content,
+        flags=re.S,
+    )
     content = ''.join(
         line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
     )

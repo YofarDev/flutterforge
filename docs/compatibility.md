@@ -11,7 +11,7 @@ counterpart of this document is `scripts/verify_template.sh` (see
 | ----------- | ------------------------- | ----------------------------------------------- |
 | Flutter SDK | 3.47.4 (stable channel)   | The version the October 2026 review verified against. CI pins this lane. |
 | Dart SDK    | 3.13.3                    | Ships with Flutter 3.47.4.                      |
-| uv          | any recent (≥ 0.12 verified) | Required by `fstr`/`fl10n`/`fimp`/`remove_counter.sh` and the root test harness. |
+| uv          | any recent (≥ 0.12 verified) | Required by `fgen`/`fstr`/`fl10n`/`fimp`/`remove_counter.sh` and the root test harness. |
 | Bash        | ≥ 3.2 (macOS stock)       | See the shell contract below.                   |
 | OS          | macOS (arm64) and Linux   | Both exercised in CI (macOS: baseline lane only). |
 

@@ -2,10 +2,23 @@
 # =============================================================================
 # fdead.sh
 #
-# Finds dead Dart files in a Flutter project — files that are never imported
-# by anything, making them orphaned after refactors.
+# ADVISORY ONLY — this script never deletes anything.
 #
-# Exclusions (never reported as dead):
+# Reports potentially unreferenced Dart files — files whose basename appears
+# in no import/export/part statement, which often means they were orphaned by
+# a refactor. The scan is purely textual (basenames in import/export/part
+# lines), so a finding is a HINT for manual review, never proof that a file
+# is safe to delete:
+#
+#   - Conditional directives (`if (dart.library.io) ...`) can reference files
+#     in branches this scan treats loosely.
+#   - Custom entry points (tools/, bin/, scripts/) are not scanned as
+#     referencing sources.
+#   - Filename collisions: a file is considered referenced if its BASENAME
+#     appears anywhere in any import — two files named the same thing mask
+#     each other.
+#
+# Exclusions (never reported):
 #   - main.dart (app entry point)
 #   - *_test.dart files (test entry points)
 #   - *.g.dart / *.freezed.dart / *.gen.dart (generated files)
@@ -14,23 +27,30 @@
 # Usage:
 #   ./fdead.sh            # scan lib/ only
 #   ./fdead.sh --test     # scan lib/ and test/
-#   ./fdead.sh --clean-dead   # delete found dead files
-#   ./fdead.sh --clean-empty  # delete empty directories (ignores .gitkeep)
+#
+# The former --clean-dead / --clean-empty flags are rejected: deletion is
+# disabled because findings require manual review.
 # =============================================================================
 
 set -euo pipefail
 
 # -- Flags --------------------------------------------------------------------
 INCLUDE_TEST=false
-CLEAN_DEAD=false
-CLEAN_EMPTY=false
 
 for arg in "$@"; do
   case $arg in
-    --test)        INCLUDE_TEST=true ;;
-    --clean-dead)  CLEAN_DEAD=true ;;
-    --clean-empty) CLEAN_EMPTY=true ;;
-    *) echo "Unknown argument: $arg  (supported: --test, --clean-dead, --clean-empty)"; exit 1 ;;
+    --test) INCLUDE_TEST=true ;;
+    --clean-dead|--clean-empty)
+      echo "Error: deletion is disabled ('$arg' is no longer supported)."
+      echo ""
+      echo "This script is advisory only: its findings are textual basename"
+      echo "matches and cannot prove that deleting a file is safe. Conditional"
+      echo "directives, custom entry points, and filename collisions can all"
+      echo "affect the results, so findings require manual review — nothing"
+      echo "is ever deleted by this script."
+      exit 1
+      ;;
+    *) echo "Unknown argument: $arg  (supported: --test)"; exit 1 ;;
   esac
 done
 
@@ -107,7 +127,7 @@ is_barrel_exported() {
 }
 
 # -- Step 4: for each candidate file, check if it's referenced anywhere -------
-DEAD_FILES=()
+UNREFERENCED_FILES=()
 SKIPPED=0
 
 for filepath in ${ALL_DART_FILES[@]+"${ALL_DART_FILES[@]}"}; do
@@ -121,7 +141,7 @@ for filepath in ${ALL_DART_FILES[@]+"${ALL_DART_FILES[@]}"}; do
      [[ "$filename" == *.freezed.dart ]] || \
      [[ "$filename" == *.gen.dart ]] || \
      is_barrel_exported "$filename"; then
-    
+
     SKIPPED=$((SKIPPED + 1))
     continue
   fi
@@ -131,25 +151,25 @@ for filepath in ${ALL_DART_FILES[@]+"${ALL_DART_FILES[@]}"}; do
     continue
   fi
 
-  DEAD_FILES+=("$rel")
+  UNREFERENCED_FILES+=("$rel")
 done
 
-# -- Step 5: report and remove dead files -------------------------------------
+# -- Step 5: report (advisory only — nothing is ever deleted) ------------------
 echo ""
 TOTAL=${#ALL_DART_FILES[@]}
-DEAD_COUNT=${#DEAD_FILES[@]}
+UNREFERENCED_COUNT=${#UNREFERENCED_FILES[@]}
 CHECKED=$(( TOTAL - SKIPPED ))
 
-echo -e "${BOLD}-- Dead Files -------------------------------------------------------${RESET}"
+echo -e "${BOLD}-- Potentially Unreferenced Files ------------------------------------${RESET}"
 
-if [[ $DEAD_COUNT -eq 0 ]]; then
-  ok "No dead files found. All $CHECKED checked files are referenced."
+if [[ $UNREFERENCED_COUNT -eq 0 ]]; then
+  ok "No potentially unreferenced files found. All $CHECKED checked files are referenced."
 else
-  echo -e "  ${RED}${BOLD}$DEAD_COUNT dead file(s) found:${RESET}"
+  echo -e "  ${RED}${BOLD}$UNREFERENCED_COUNT potentially unreferenced file(s) found:${RESET}"
   echo ""
 
   current_dir=""
-  for f in "${DEAD_FILES[@]}"; do
+  for f in "${UNREFERENCED_FILES[@]}"; do
     dir=$(dirname "$f")
     if [[ "$dir" != "$current_dir" ]]; then
       echo -e "  ${DIM}$dir/${RESET}"
@@ -158,30 +178,13 @@ else
     dead "$(basename "$f")"
   done
 
-  if [[ "$CLEAN_DEAD" == true ]]; then
-    echo ""
-    REMOVED_FILES=0
-    for f in "${DEAD_FILES[@]}"; do
-      if rm -f "$PROJECT_ROOT/$f"; then
-        ok "Removed  $f"
-        REMOVED_FILES=$((REMOVED_FILES + 1))
-      fi
-    done
-    
-    echo ""
-    if [[ $REMOVED_FILES -gt 0 ]]; then
-      ok "$REMOVED_FILES file(s) removed."
-    else
-      warn "No files could be removed."
-    fi
-  else
-    echo ""
-    echo -e "${DIM}  Tip: run with --clean-dead to delete these files.${RESET}"
-  fi
+  echo ""
+  warn "This scan is textual and advisory: conditional directives, custom entry"
+  warn "points, and filename collisions can affect findings. Nothing was deleted;"
+  warn "review each file manually before removing anything yourself."
 fi
 
-# -- Step 6: find empty directories in lib/ -----------------------------------
-# (We run this after removing dead files so newly emptied dirs are caught)
+# -- Step 6: find empty directories in lib/ (report only) ----------------------
 EMPTY_DIRS=()
 while IFS= read -r -d '' d; do
   # Exclude .gitkeep from making a directory "not empty"
@@ -192,7 +195,7 @@ done < <(find "$LIB_DIR" -mindepth 1 -type d -print0 | sort -rz)
 
 EMPTY_COUNT=${#EMPTY_DIRS[@]}
 
-# -- Step 7: report and remove empty directories ------------------------------
+# -- Step 7: report empty directories (advisory only — nothing is removed) -----
 echo ""
 echo -e "${BOLD}-- Empty Directories in lib/ ----------------------------------------${RESET}"
 
@@ -205,32 +208,9 @@ else
     echo -e "  ${YELLOW}⊘${RESET}  ${DIM}$d/${RESET}"
   done
 
-  if [[ "$CLEAN_EMPTY" == true ]]; then
-    echo ""
-    REMOVED=0
-    while IFS= read -r -d '' d; do
-      rel="${d#$PROJECT_ROOT/}"
-      # Same emptiness check: contains no files (excluding .gitkeep)
-      if [[ -z "$(find "$d" -mindepth 1 -type f ! -name ".gitkeep" -print -quit)" ]]; then
-        # Delete .gitkeep first if it exists so rmdir will succeed
-        rm -f "$d/.gitkeep"
-        if rmdir "$d" 2>/dev/null; then
-          ok "Removed  $rel/"
-          REMOVED=$((REMOVED + 1))
-        fi
-      fi
-    done < <(find "$LIB_DIR" -mindepth 1 -type d -depth -print0)
-    
-    echo ""
-    if [[ $REMOVED -gt 0 ]]; then
-      ok "$REMOVED director$([ $REMOVED -eq 1 ] && echo y || echo ies) removed."
-    else
-      warn "No directories could be removed."
-    fi
-  else
-    echo ""
-    echo -e "${DIM}  Tip: run with --clean-empty to delete these directories.${RESET}"
-  fi
+  echo ""
+  echo -e "${DIM}  Advisory only: nothing was removed. Remove empty directories (and"
+  echo -e "  their .gitkeep files) manually if they are truly unused.${RESET}"
 fi
 
 echo ""

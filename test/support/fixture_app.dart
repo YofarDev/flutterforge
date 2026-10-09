@@ -11,6 +11,10 @@ library;
 
 /// The valid base fixture app: `lib/**.dart` path → source.
 final Map<String, String> fixtureApp = <String, String>{
+  // The forbidden localization import must resolve: negative policy fixtures
+  // must fail because of the boundary rule rather than a missing-file error.
+  'lib/core/l10n/generated/app_localizations.dart':
+      'class AppLocalizations {}\n',
   'lib/main.dart': '''
 import 'package:flutter/material.dart';
 

@@ -1,0 +1,59 @@
+# Quality gate for THIS generated application.
+#
+# Standalone by design: it never references the FlutterForge template
+# repository or its verification harness. Sequence: generate code first
+# (localizations, build_runner), then run the non-mutating fverify gate
+# (dart format CHECK + flutter analyze + flutter test) against committed
+# source. CI never runs `dart fix --apply` or mutating formatting.
+#
+# No secrets, signing credentials, aliases, or personal hooks are required.
+#
+# NOTE: requiring this check for merges must be configured separately in the
+# repository's branch protection / ruleset settings — a workflow file alone
+# does not enforce merge gating.
+#
+# The Flutter version is the FlutterForge verified baseline (see the template
+# repository's docs/compatibility.md); bump it deliberately together with the
+# baseline.
+
+name: flutter-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: flutter-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: format check + analyze + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (read-only)
+        uses: actions/checkout@v7
+
+      - name: Install Flutter (pinned baseline)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.4
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Generate localizations
+        run: flutter gen-l10n
+
+      - name: Generate code (freezed / json_serializable)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Verify (format check, analyze, test)
+        run: bash scripts/fverify.sh

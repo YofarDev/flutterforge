@@ -11,6 +11,11 @@ sealed class CounterSettingsDto with _$CounterSettingsDto {
     @Default(1) int stepSize,
     int? minValue,
     int? maxValue,
+
+    /// Defaults mirror the domain model so JSON stored before these fields
+    /// existed restores the same values `CounterSettings` would create.
+    @Default(false) bool showMilestones,
+    @Default(10) int milestoneInterval,
   }) = _CounterSettingsDto;
 
   factory CounterSettingsDto.fromJson(Map<String, dynamic> json) =>
@@ -23,6 +28,8 @@ sealed class CounterSettingsDto with _$CounterSettingsDto {
       stepSize: domain.stepSize,
       minValue: domain.minValue,
       maxValue: domain.maxValue,
+      showMilestones: domain.showMilestones,
+      milestoneInterval: domain.milestoneInterval,
     );
   }
 
@@ -31,6 +38,8 @@ sealed class CounterSettingsDto with _$CounterSettingsDto {
       stepSize: stepSize,
       minValue: minValue,
       maxValue: maxValue,
+      showMilestones: showMilestones,
+      milestoneInterval: milestoneInterval,
     );
   }
 }

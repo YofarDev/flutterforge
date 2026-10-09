@@ -949,3 +949,65 @@ comparator = condition never fires, verify stays green):
   successful builds, debugging iterations, runtime failures, visual defects,
   final animation quality. Tells which sections earn their lines.
 
+
+## 2026-10-09 · Rigging a single raster illustration (dog: sit/bark/paw) (rive 1.4.0)
+
+Verified live end-to-end (screenshots + pointer clicks + --data-dump):
+- **Raster cut-out rig works well with plain `Image` + node chains.** Cut the PNG
+  into parts with PIL/OpenCV (polygon masks), export cropped PNGs + offsets,
+  place each with `<Image x=cropX y=cropY originX="0" originY="0">` inside
+  `Pivot(px,py) > keyed node(s) > Space(-px,-py)` — every part stays authored
+  in source-image pixels, one outer `Dog` node scales the lot.
+- **Seamless rest pose:** the part gets a feathered mask from its cut line; the
+  body keeps the original pixels for ~24px PAST the cut (erase starts below),
+  so the part overlaps identical pixels at rest (max diff vs original ≈ 0).
+- **Put limbs BEHIND the body** (later sibling): translating a leg up hides its
+  top under the torso — a "folded" hind leg for a sit pose is just leg
+  rotation = −bodyRotation + translate up so only the paw peeks out.
+- **Straight cut edges read as fake once parts move.** Shape every exposed cut
+  as the art's fur tufts: per-column triangular "spike" offsets applied with
+  `cv2.remap` (shift mask columns down by prof[x]) — haunch/head seams vanish.
+- Behind the head, keep the body opaque (erase only ears/top) and inpaint the
+  face features (`cv2.inpaint` + blur) so head motion never shows a 2nd face.
+- Jaw for barking: cut lower lip+tongue as its own part, paint the head layer's
+  jaw region dark mouth colour; key jaw y+scaleY → open mouth.
+- Translating nodes inside a rotated parent: convert world offsets with R(−θ)
+  in the generator (`x = wx cosθ + wy sinθ`, `y = −wx sinθ + wy cosθ`).
+- Pose blend: two one-key pose timelines + `StateTransition duration=600`
+  with a nested `CubicEaseInterpolator` = smooth eased sit/stand both ways.
+  Keep text label swaps on their OWN layer with duration-0 transitions, or
+  the posture blend cross-fades "Sit"/"Stand" into overlapping text.
+- VM trigger from a button: `ListenerViewModelChange > BindablePropertyTrigger
+  propertyValue="1" > DataBindContext propertyKey=686 direction=true`; reading
+  side `TransitionValueTriggerComparator` (pattern from keyboard_menu sample).
+- `--viewport` larger than a fixed-size artboard renders it at 1x in the
+  top-left — it does not zoom. To inspect detail, crop+upscale with PIL.
+- Generator script (Python → RML) with an id counter beat hand-editing for a
+  ~420-object file; tools kept beside the project, not inside it.
+- (polish pass, same day) **Image meshes WITHOUT bones work and are keyable:**
+  `<Image originX="0" originY="0"><Mesh triangleIndexBytes=…>` with grid
+  `ContourMeshVertex`/`MeshVertex` (no Skin) renders; vertex x/y are image-local
+  PIXELS from the top-left when origin is 0,0 (verified vs a plain Image), and
+  keying `MeshVertex` x/y in a LinearAnimation deforms the bitmap. Generator
+  pattern: deform fn(X,Y)->(X',Y') evaluated per keyframe, key only vertices
+  that move. Used for: mouth open with pinned corners (dy = A·sin(πu)), bendy
+  tail (rotation weighted by distance from base), wrist flex, ear twitch.
+  Two layers keying the same vertices: later layer wins only while its state
+  has keys (an empty "rest" anim leaves the earlier layer in control).
+- Secondary motion on top of a pose BLEND: separate "FX" layer with one-shot
+  settle/push timelines keyed on extra chain nodes (Body.FX/Head.FX/Tail.FX) —
+  hierarchy makes them additive to the blended pose.
+- `cursor: {property: cursor}` in rive.yaml + enter/exit listeners writing a VM
+  string "pointer"/"arrow" — `--data-dump` shows cursor=pointer on hover.
+- (sit rework, same day) **Articulated torso from ONE bitmap = two-frame linear-blend
+  skinning baked into keyed mesh vertices** (no Rive bones): front frame = Body
+  node transform, rear frame = extra matrix; vertex = lerp(v, Rear·v, w(x,y)) with
+  a wide smoothstep seam (narrow seams fold triangles → visible straight creases).
+  Attachments (head/tail/legs) get node transforms SOLVED from desired world
+  placement: L = T(-pivot)·Parent⁻¹·World·T(pivot), decomposed to x/y/rotation.
+  Authored transitions = pose(p) sampled every 2 frames (linear keys) along
+  Catmull-Rom curves for p/head-lag/tail-lag/squash — arcs stay correct where a
+  state blend would lerp vertices along chords. Pitfall: p<0 "anticipation"
+  lifts the rear off world-pinned legs → gap; animate anticipation on other
+  channels instead. Draw-order swap trick: a front-layer copy of a part riding
+  the same solved transform, opacity faded in while both overlap.

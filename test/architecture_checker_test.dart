@@ -1,42 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/architecture_checker.dart';
+import 'support/checker_expectations.dart';
 import 'support/fixture_app.dart';
-
-/// Regression tests for the analyzer-based architecture checker.
-///
-/// Every rule has both allowed and forbidden fixtures. A checker run is only
-/// "clean" when it has neither violations nor checker errors (fail closed).
-
-/// Domain-service fixture importing get_it with an aliased/direct resolution.
-String getItFixture(String importLine, String resolution) {
-  final String withImportLine = withImport(
-    fixtureApp['lib/features/alpha/domain/services/alpha_service.dart']!,
-    importLine,
-  );
-  return '$withImportLine\n$resolution\n';
-}
-
-/// Adds [importLine] to the domain service fixture and expects a
-/// `domain-purity` violation.
-Future<void> expectDomainForbidden(String importLine) async {
-  final CheckerResult result = await ArchitectureChecker.checkSources(
-    fixtureWith(<String, String>{
-      'lib/features/alpha/domain/services/alpha_service.dart': withImport(
-        fixtureApp['lib/features/alpha/domain/services/alpha_service.dart']!,
-        importLine,
-      ),
-    }),
-  );
-  expect(
-    result.violations.map(
-      (ArchitectureViolation violation) => violation.ruleId,
-    ),
-    contains('domain-purity'),
-    reason:
-        '$importLine should violate domain-purity, got: ${result.violations}',
-  );
-}
 
 void main() {
   Future<void> expectClean(

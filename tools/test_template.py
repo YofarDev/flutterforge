@@ -133,8 +133,9 @@ def read_invocations(log: Path) -> list[list[str]]:
     return invocations
 
 
-def run_generator(args: list[str], cwd: Path, env: dict | None = None, timeout: int = COMMAND_TIMEOUT) -> subprocess.CompletedProcess:
-    command = [REAL_DART, str(GENERATOR), *args]
+def run_generator(args: list[str], cwd: Path, env: dict | None = None, timeout: int = COMMAND_TIMEOUT,
+                  generator: Path = GENERATOR) -> subprocess.CompletedProcess:
+    command = [REAL_DART, str(generator), *args]
     return subprocess.run(
         command,
         cwd=str(cwd),
@@ -606,6 +607,33 @@ SHIPPED_SCRIPTS = sorted((REPO_ROOT / "scripts").glob("*.sh")) + [
 ]
 
 
+class TestFeatureRenderer(unittest.TestCase):
+    def test_values_are_literal_and_not_recursively_expanded(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_render_") as raw:
+            template = Path(raw) / "feature.dart.tpl"
+            template.write_text("{{VALUE}}\n{{OTHER}}\n")
+            value = "$(touch sentinel) `touch sentinel` $HOME {{OTHER}}"
+            result = run_command([
+                "uv", "run", "--no-project", str(REPO_ROOT / "scripts/render_feature.py"),
+                str(template), "VALUE", value, "OTHER", "done",
+            ], cwd=template.parent)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(result.stdout, value + "\ndone\n")
+            self.assertFalse((template.parent / "sentinel").exists())
+
+    def test_missing_values_fail_without_partial_output(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_render_") as raw:
+            template = Path(raw) / "feature.dart.tpl"
+            template.write_text("before {{MISSING}} after\n")
+            result = run_command([
+                "uv", "run", "--no-project", str(REPO_ROOT / "scripts/render_feature.py"),
+                str(template),
+            ], cwd=template.parent)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(result.stdout, "")
+            self.assertIn("MISSING", result.stderr)
+
+
 class TestShellContract(unittest.TestCase):
     """The documented shell contract (docs/compatibility.md) is enforced.
 
@@ -671,6 +699,806 @@ class TestShellContract(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=fmt(result))
             self.assertIn("Hello Wonderful World", result.stdout)
+
+
+class TestFdeadAdvisory(unittest.TestCase):
+    """fdead.sh is advisory only: no supported invocation deletes anything.
+
+    The textual basename scan cannot prove deletion is safe, so the cleanup
+    flags must be refused and ordinary scans must leave the tree untouched.
+    """
+
+    def _make_app(self, parent: Path, name: str = "fdead_app") -> Path:
+        """App with an orphan, conditional implementation files, and an empty
+        directory whose only content is a .gitkeep placeholder."""
+        app = parent / name
+        (app / "lib").mkdir(parents=True)
+        (app / "pubspec.yaml").write_text("name: fdead_app\n")
+        (app / "lib" / "main.dart").write_text(
+            "import 'feature.dart';\nvoid main() {}\n"
+        )
+        (app / "lib" / "feature.dart").write_text(
+            "import 'impl_stub.dart' if (dart.library.io) 'impl_io.dart';\n"
+            "void feature() {}\n"
+        )
+        (app / "lib" / "impl_stub.dart").write_text("void impl() {}\n")
+        (app / "lib" / "impl_io.dart").write_text("void impl() {}\n")
+        # Not imported anywhere — the advisory finding.
+        (app / "lib" / "orphan.dart").write_text("void orphan() {}\n")
+        (app / "lib" / "empty" / ".gitkeep").parent.mkdir()
+        (app / "lib" / "empty" / ".gitkeep").write_text("")
+        return app
+
+    def _run_fdead(self, app: Path, *flags: str) -> subprocess.CompletedProcess:
+        return run_command(
+            ["bash", str(REPO_ROOT / "scripts" / "fdead.sh"), *flags], cwd=app
+        )
+
+    def test_default_scan_reports_orphans_and_changes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            before = tree_snapshot(app)
+            result = self._run_fdead(app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("orphan.dart", result.stdout)
+            self.assertIn("Potentially Unreferenced Files", result.stdout)
+            self.assertNotIn("--clean-dead", result.stdout)
+            self.assertEqual(tree_snapshot(app), before, "a scan must not mutate the tree")
+
+    def test_test_flag_scan_is_non_mutating(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "test").mkdir()
+            (app / "test" / "orphan_test.dart").write_text("void main() {}\n")
+            (app / "test" / "unreferenced_helper.dart").write_text("void h() {}\n")
+            before = tree_snapshot(app)
+            result = self._run_fdead(app, "--test")
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("unreferenced_helper.dart", result.stdout)
+            self.assertNotIn("orphan_test.dart", result.stdout, "test entry points are excluded")
+            self.assertEqual(tree_snapshot(app), before)
+
+    def test_clean_dead_flag_is_rejected_without_any_change(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            before = tree_snapshot(app)
+            result = self._run_fdead(app, "--clean-dead")
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("deletion is disabled", result.stdout + result.stderr)
+            self.assertIn("manual review", result.stdout + result.stderr)
+            self.assertEqual(tree_snapshot(app), before)
+
+    def test_clean_empty_flag_is_rejected_and_gitkeep_survives(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            before = tree_snapshot(app)
+            result = self._run_fdead(app, "--clean-empty")
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("deletion is disabled", result.stdout + result.stderr)
+            self.assertEqual(tree_snapshot(app), before)
+            self.assertTrue((app / "lib" / "empty" / ".gitkeep").exists())
+
+    def test_conditional_implementation_files_survive_scan(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            impl_io = app / "lib" / "impl_io.dart"
+            content_before = impl_io.read_bytes()
+            result = self._run_fdead(app, "--test")
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertTrue(impl_io.exists())
+            self.assertEqual(impl_io.read_bytes(), content_before)
+
+    def test_reports_caveats_about_textual_scan(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            result = self._run_fdead(app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            for caveat in ("conditional", "entry", "collisions"):
+                self.assertIn(caveat, result.stdout.lower(), msg=caveat)
+
+
+class TestFstrInsertion(unittest.TestCase):
+    """fstr.sh validates both ARB files strictly and never alters existing
+    translations — a failed insertion performs no writes at all."""
+
+    def _make_app(self, parent: Path, name: str = "fstr_app") -> Path:
+        app = parent / name
+        l10n = app / "lib" / "core" / "l10n"
+        l10n.mkdir(parents=True)
+        (app / "lib" / "main.dart").write_text("void main() {}\n")
+        (l10n / "app_localizations_en.arb").write_text(
+            '{\n'
+            '  "@@locale": "en",\n'
+            '  "hello": "Hello",\n'
+            '  "@hello": "Greeting shown on the home screen",\n'
+            '  "farewell": "Goodbye"\n'
+            '}\n'
+        )
+        (l10n / "app_localizations_fr.arb").write_text(
+            '{\n'
+            '  "@@locale": "fr",\n'
+            '  "hello": "Bonjour",\n'
+            '  "@hello": "Salutation affichée sur l\\u2019écran d\\u2019accueil",\n'
+            '  "farewell": "Au revoir"\n'
+            '}\n'
+        )
+        return app
+
+    def _run_fstr(self, app: Path, key: str, fr: str, en: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts" / "fstr.sh"), key, fr, en, str(app)],
+            cwd=str(app),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=COMMAND_TIMEOUT,
+        )
+
+    def _assert_arbs_unchanged(self, app: Path, before: dict[str, bytes]) -> None:
+        l10n = app / "lib" / "core" / "l10n"
+        self.assertEqual((l10n / "app_localizations_en.arb").read_bytes(), before["en"])
+        self.assertEqual((l10n / "app_localizations_fr.arb").read_bytes(), before["fr"])
+
+    def _arb_snapshot(self, app: Path) -> dict[str, bytes]:
+        l10n = app / "lib" / "core" / "l10n"
+        return {
+            "en": (l10n / "app_localizations_en.arb").read_bytes(),
+            "fr": (l10n / "app_localizations_fr.arb").read_bytes(),
+        }
+
+    def test_trailing_commas_brackets_and_braces_survive_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            env, _ = fake_tool_env(app)
+            for language, value in (("en", "Hello, } and, ]"), ("fr", "Bonjour, } et, ]")):
+                path = app / f"lib/core/l10n/app_localizations_{language}.arb"
+                data = json.loads(path.read_text())
+                data["hello"] = value
+                path.write_text(json.dumps(data))
+            result = self._run_fstr(app, "punctKey", "Nouveau", "New", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            en = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
+            fr = json.loads((app / "lib/core/l10n/app_localizations_fr.arb").read_text())
+            self.assertEqual(en["punctKey"], "New")
+            self.assertEqual(fr["punctKey"], "Nouveau")
+            self.assertEqual(en["hello"], "Hello, } and, ]")
+            self.assertEqual(fr["hello"], "Bonjour, } et, ]")
+
+    def test_non_json_numeric_constants_change_neither_arb(self) -> None:
+        for language in ("fr", "en"):
+            for constant in ("NaN", "Infinity", "-Infinity"):
+                with self.subTest(language=language, constant=constant):
+                    with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+                        app = self._make_app(Path(raw).resolve())
+                        path = app / f"lib/core/l10n/app_localizations_{language}.arb"
+                        path.write_text('{"hello": "Hello", "@hello": {"value": ' + constant + '}}')
+                        env, _ = fake_tool_env(app)
+                        before = self._arb_snapshot(app)
+                        result = self._run_fstr(app, "newKey", "Nouveau", "New", env=env)
+                        self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+                        self._assert_arbs_unchanged(app, before)
+
+    def test_escapes_newlines_unicode_and_placeholders_survive(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            env, _ = fake_tool_env(app)
+            fr = "Prix: \"€100\"\nPour {userName}, chemin C:\\temp → café"
+            en = "Price: \"$100\"\nFor {userName}, path C:\\temp — ok"
+            result = self._run_fstr(app, "priceKey", fr, en, env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            en_data = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
+            fr_data = json.loads((app / "lib/core/l10n/app_localizations_fr.arb").read_text())
+            self.assertEqual(en_data["priceKey"], en)
+            self.assertEqual(fr_data["priceKey"], fr)
+
+    def test_metadata_survives_reserialization(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            env, _ = fake_tool_env(app)
+            result = self._run_fstr(app, "newKey", "Nouveau", "New", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            en = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
+            fr = json.loads((app / "lib/core/l10n/app_localizations_fr.arb").read_text())
+            self.assertEqual(en["@hello"], "Greeting shown on the home screen")
+            self.assertEqual(en["@@locale"], "en")
+            self.assertEqual(fr["@hello"], "Salutation affichée sur l’écran d’accueil")
+            self.assertEqual(fr["@@locale"], "fr")
+
+    def test_invalid_fr_json_changes_neither_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib/core/l10n/app_localizations_fr.arb").write_text(
+                '{\n  "hello": "Bonjour",\n}\n'  # trailing comma: invalid strict JSON
+            )
+            env, _ = fake_tool_env(app)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "newKey", "Nouveau", "New", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self._assert_arbs_unchanged(app, before)
+            self.assertFalse(
+                list((app / "lib/core/l10n").glob("*.tmp-*")),
+                "no temp files may be left behind",
+            )
+
+    def test_invalid_en_json_changes_neither_file(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib/core/l10n/app_localizations_en.arb").write_text("{ not json")
+            env, _ = fake_tool_env(app)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "newKey", "Nouveau", "New", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self._assert_arbs_unchanged(app, before)
+
+    def test_fr_only_collision_changes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            fr_path = app / "lib/core/l10n/app_localizations_fr.arb"
+            fr_path.write_text('{\n  "hello": "Bonjour",\n  "collidedKey": "pris"\n}\n')
+            env, _ = fake_tool_env(app)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "collidedKey", "Nouveau", "New", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("app_localizations_fr.arb", result.stderr)
+            self._assert_arbs_unchanged(app, before)
+
+    def test_en_only_collision_changes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            en_path = app / "lib/core/l10n/app_localizations_en.arb"
+            en_path.write_text('{\n  "hello": "Hello",\n  "enOnlyKey": "English only"\n}\n')
+            env, _ = fake_tool_env(app)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "enOnlyKey", "Français", "English only", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("app_localizations_en.arb", result.stderr)
+            self._assert_arbs_unchanged(app, before)
+
+    def test_duplicate_json_keys_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib/core/l10n/app_localizations_en.arb").write_text(
+                '{\n  "hello": "Hello",\n  "hello": "Hi again"\n}\n'
+            )
+            env, _ = fake_tool_env(app)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "newKey", "Nouveau", "New", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Duplicate JSON key", result.stderr)
+            self._assert_arbs_unchanged(app, before)
+
+    def test_successful_insertion_updates_both_languages(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            env, log = fake_tool_env(app)
+            result = self._run_fstr(app, "welcomeKey", "Bienvenue", "Welcome", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            en = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
+            fr = json.loads((app / "lib/core/l10n/app_localizations_fr.arb").read_text())
+            self.assertEqual(en["welcomeKey"], "Welcome")
+            self.assertEqual(fr["welcomeKey"], "Bienvenue")
+            self.assertIn("gen-l10n", read_invocations(log)[0])
+
+    def test_gen_l10n_failure_returns_nonzero_after_update(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            env, log = fake_tool_env(app, flutter_fail=True)
+            result = self._run_fstr(app, "welcomeKey", "Bienvenue", "Welcome", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("gen-l10n", result.stdout + result.stderr)
+            # The ARB update itself succeeded before generation failed.
+            en = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
+            self.assertEqual(en["welcomeKey"], "Welcome")
+
+    def test_non_object_root_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib/core/l10n/app_localizations_en.arb").write_text("[1, 2, 3]\n")
+            env, _ = fake_tool_env(app)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "newKey", "Nouveau", "New", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("not a JSON object", result.stderr)
+            self._assert_arbs_unchanged(app, before)
+
+
+class TestFimpPreviewFirst(unittest.TestCase):
+    """fimp.sh contract: preview by default, --apply repairs and verifies.
+
+    Uses a stateful fake `flutter`: the first `analyze` reports the broken
+    imports (exit 1, as the real analyzer does), the second (verification)
+    run's output/status is configurable.
+    """
+
+    FAKE_FLUTTER_ANALYZE = """#!/bin/sh
+printf '%s\\n' "$@" >> "$FORGE_FAKE_LOG"
+echo '---' >> "$FORGE_FAKE_LOG"
+if [ "${1:-}" = "analyze" ]; then
+  if [ -f "$FORGE_ANALYZE_STATE" ]; then
+    printf '%s' "$FORGE_FIMP_SECOND_OUTPUT"
+    exit ${FORGE_FIMP_SECOND_STATUS:-0}
+  fi
+  touch "$FORGE_ANALYZE_STATE"
+  printf '%s' "$FORGE_FIMP_FIRST_OUTPUT"
+  exit ${FORGE_FIMP_FIRST_STATUS:-1}
+fi
+if [ -n "${FORGE_FAKE_FLUTTER_FAIL:-}" ]; then
+  exit 64
+fi
+exit 0
+"""
+
+    def _make_app(self, parent: Path, name: str = "fimp_app") -> Path:
+        app = parent / name
+        (app / "lib").mkdir(parents=True)
+        (app / "pubspec.yaml").write_text("name: fimp_app\n")
+        return app
+
+    def _fake_env(self, app: Path, first_output: str, *, first_status: int = 1,
+                  second_output: str = "No issues found!", second_status: int = 0) -> dict:
+        bin_dir = app.parent / "fakebin"
+        bin_dir.mkdir(exist_ok=True)
+        flutter = bin_dir / "flutter"
+        flutter.write_text(self.FAKE_FLUTTER_ANALYZE)
+        flutter.chmod(0o755)
+        log = app.parent / "fake_tools.log"
+        log.touch()
+        (bin_dir / "analyze_state").unlink(missing_ok=True)
+        env = dict(os.environ)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env["FORGE_FAKE_LOG"] = str(log)
+        env["FORGE_ANALYZE_STATE"] = str(bin_dir / "analyze_state")
+        env["FORGE_FIMP_FIRST_OUTPUT"] = first_output
+        env["FORGE_FIMP_FIRST_STATUS"] = str(first_status)
+        env["FORGE_FIMP_SECOND_OUTPUT"] = second_output
+        env["FORGE_FIMP_SECOND_STATUS"] = str(second_status)
+        env.pop("FORGE_FAKE_FLUTTER_FAIL", None)
+        return env
+
+    def _run_fimp(self, app: Path, *flags: str, env: dict | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts" / "fimp.sh"), *flags],
+            cwd=str(app), env=env,
+            capture_output=True, text=True, timeout=COMMAND_TIMEOUT,
+        )
+
+    BROKEN_MAIN = (
+        "Analyzing fimp_app...\n"
+        "\n"
+        "lib/main.dart:3:8: Error: Target of URI doesn't exist: './old/helper.dart'.\n"
+        "import './old/helper.dart';\n"
+        "       ^^^^^^^^^^^^^^^^^^\n"
+        "1 issue found.\n"
+    )
+
+    def _app_with_moved_helper(self, parent: Path) -> Path:
+        """helper.dart moved from lib/old/ to lib/new/; main.dart not updated.
+        The file also contains decoys: a comment and a string with the same
+        URI text, which must remain unchanged."""
+        app = self._make_app(parent)
+        (app / "lib" / "new").mkdir()
+        (app / "lib" / "new" / "helper.dart").write_text("void helper() {}\n")
+        (app / "lib" / "main.dart").write_text(
+            "import './old/helper.dart' as h;\n"
+            "\n"
+            "// A comment mentioning './old/helper.dart' must stay.\n"
+            "const String decoy = \"./old/helper.dart\";\n"
+            "void main() { h.helper(); print(decoy); }\n"
+        )
+        return app
+
+    def test_default_run_is_a_harmless_preview(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            env = self._fake_env(app, self.BROKEN_MAIN)
+            before = (app / "lib/main.dart").read_bytes()
+            result = self._run_fimp(app, env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("+ ./new/helper.dart", result.stdout)
+            self.assertIn("Preview only", result.stdout)
+            self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_token_repairs_preserve_comments_strings_and_combinators(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_tokens_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            path = app / "lib/main.dart"
+            path.write_text(
+                "/*\nimport './old/helper.dart';\n/* nested */\n*/\n"
+                "import 'other.dart'; // previous URI './old/helper.dart'\n"
+                "import\n  './old/helper.dart'\n  as h show helper;\n"
+                "const String sample = '''\nimport './old/helper.dart';\n''';\n"
+                "void main() { h.helper(); }\n"
+            )
+            (app / "lib/other.dart").write_text("class Other {}\n")
+            before = path.read_text()
+            result = self._run_fimp(app, "--apply", env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(path.read_text(), before.replace(
+                "import\n  './old/helper.dart'\n", "import\n  './new/helper.dart'\n"))
+
+    def test_repeated_uri_and_conditional_branch_tokens_are_all_repaired(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_tokens_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            path = app / "lib/main.dart"
+            path.write_text(
+                "import './old/helper.dart' as a;\n"
+                "import 'fallback.dart' if (dart.library.io) './old/helper.dart' as b;\n"
+                "export './old/helper.dart' show helper;\n"
+                "void main() {}\n"
+            )
+            (app / "lib/fallback.dart").write_text("void helper() {}\n")
+            result = self._run_fimp(app, "--apply", env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(path.read_text().count("'./new/helper.dart'"), 3)
+            self.assertNotIn("'./old/helper.dart'", path.read_text())
+
+    def test_relative_imports_work_in_lib_and_test_including_bare_uris(self) -> None:
+        for tree in ("lib", "test"):
+            for uri in ("old/helper.dart", "./old/helper.dart", "../old/helper.dart"):
+                with self.subTest(tree=tree, uri=uri):
+                    with tempfile.TemporaryDirectory(prefix="forge_fimp_relative_") as raw:
+                        app = self._make_app(Path(raw).resolve())
+                        (app / tree / "new").mkdir(parents=True)
+                        (app / tree / "new/helper.dart").write_text("void helper() {}\n")
+                        (app / tree / "unit").mkdir()
+                        path = app / tree / "unit/consumer.dart"
+                        path.write_text(f"import '{uri}';\nvoid main() {{ helper(); }}\n")
+                        diagnostic = f"{tree}/unit/consumer.dart:1:8: Error: Target of URI doesn't exist: '{uri}'.\n"
+                        result = self._run_fimp(app, "--apply", env=self._fake_env(app, diagnostic))
+                        self.assertEqual(result.returncode, 0, msg=fmt(result))
+                        self.assertIn("import '../new/helper.dart';", path.read_text())
+                        self.assertNotIn("infrastructure failure", result.stdout)
+
+    def test_conditional_comparison_strings_are_not_uri_tokens(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_conditional_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            path = app / "lib/main.dart"
+            source = (
+                "import './old/helper.dart'\n"
+                "    if (dart.library.io == './old/helper.dart') './old/helper.dart' as h;\n"
+                "void main() { h.helper(); }\n"
+            )
+            path.write_text(source)
+            result = self._run_fimp(app, "--apply", env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(path.read_text(), source.replace(
+                "import './old/helper.dart'", "import './new/helper.dart'"
+            ).replace("') './old/helper.dart' as h;", "') './new/helper.dart' as h;"))
+
+    def test_unterminated_directive_is_not_partially_repaired(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_unterminated_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            path = app / "lib/main.dart"
+            source = "import './old/helper.dart'"
+            path.write_text(source)
+            result = self._run_fimp(app, "--apply", env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(path.read_text(), source)
+            self.assertIn("Unsupported directive form", result.stdout)
+
+    def test_raw_uri_literal_and_crlf_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_tokens_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            path = app / "lib/main.dart"
+            path.write_bytes(b"import r'./old/helper.dart' as h;\r\nvoid main() { h.helper(); }\r\n")
+            result = self._run_fimp(app, "--apply", env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(path.read_bytes(), b"import r'./new/helper.dart' as h;\r\nvoid main() { h.helper(); }\r\n")
+
+    def test_unresolved_apply_fails_and_preview_remains_advisory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_unresolved_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            (app / "lib/new/helper.dart").unlink()
+            before = tree_snapshot(app)
+            result = self._run_fimp(app, env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Unresolved", result.stdout)
+            self.assertEqual(tree_snapshot(app), before)
+            result = self._run_fimp(app, "--apply", env=self._fake_env(app, self.BROKEN_MAIN))
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Verification FAILED", result.stdout)
+            self.assertEqual(tree_snapshot(app), before)
+
+    def test_real_analysis_errors_are_not_reported_as_startup_failures(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_error_") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            result = self._run_fimp(app, env=self._fake_env(
+                app, "lib/main.dart:1:1: Error: unrelated syntax error\n1 issue found.\n"))
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("outside supported import repairs", result.stdout)
+            self.assertNotIn("infrastructure failure", result.stdout)
+
+    def test_dry_run_is_identical_to_default(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            env = self._fake_env(app, self.BROKEN_MAIN)
+            before = (app / "lib/main.dart").read_bytes()
+            result = self._run_fimp(app, "--dry-run", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("+ ./new/helper.dart", result.stdout)
+            self.assertIn("Preview only", result.stdout)
+            self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_apply_rewrites_only_the_import_directive(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            env = self._fake_env(app, self.BROKEN_MAIN)
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Applied:", result.stdout)
+            content = (app / "lib/main.dart").read_text()
+            self.assertIn("import './new/helper.dart' as h;\n", content)
+            self.assertIn("// A comment mentioning './old/helper.dart' must stay.", content)
+            self.assertIn('const String decoy = "./old/helper.dart";', content)
+
+    def test_unknown_and_conflicting_flags_fail_without_editing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            env = self._fake_env(app, self.BROKEN_MAIN)
+            before = (app / "lib/main.dart").read_bytes()
+            for flags in (("--bogus",), ("--apply", "--dry-run"), ("--dry-run", "--apply")):
+                with self.subTest(flags=flags):
+                    result = self._run_fimp(app, *flags, env=env)
+                    self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+                    self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_lib_import_is_never_repaired_into_test(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "test" / "helper").mkdir(parents=True)
+            (app / "test" / "helper" / "helper.dart").write_text("void h() {}\n")
+            (app / "lib" / "main.dart").write_text(
+                "import './helper/helper.dart';\nvoid main() {}\n"
+            )
+            broken = (
+                "Analyzing fimp_app...\n\n"
+                "lib/main.dart:1:8: Error: Target of URI doesn't exist: './helper/helper.dart'.\n"
+                "import './helper/helper.dart';\n"
+                "       ^^^^^^^^^^^^^^^^^^\n"
+                "1 issue found.\n"
+            )
+            env = self._fake_env(app, broken)
+            before = (app / "lib/main.dart").read_bytes()
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Unresolved", result.stdout)
+            self.assertIn("not found in lib/", result.stdout)
+            self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_test_to_test_repair_produces_relative_import(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "test" / "support").mkdir(parents=True)
+            (app / "test" / "support" / "fake_repo.dart").write_text("class FakeRepo {}\n")
+            (app / "test" / "unit").mkdir()
+            (app / "test" / "unit" / "thing_test.dart").write_text(
+                "import 'package:fimp_app/support/fake_repo.dart';\nvoid main() {}\n"
+            )
+            broken = (
+                "Analyzing fimp_app...\n\n"
+                "test/unit/thing_test.dart:1:8: Error: Target of URI doesn't exist: "
+                "'package:fimp_app/support/fake_repo.dart'.\n"
+                "import 'package:fimp_app/support/fake_repo.dart';\n"
+                "       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+                "1 issue found.\n"
+            )
+            env = self._fake_env(app, broken)
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("+ ../support/fake_repo.dart", result.stdout)
+            content = (app / "test/unit/thing_test.dart").read_text()
+            self.assertIn("import '../support/fake_repo.dart';", content)
+            self.assertNotIn("package:", content)
+
+    def test_test_to_lib_repair_produces_package_import(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib" / "widgets").mkdir(parents=True)
+            (app / "lib" / "widgets" / "button.dart").write_text("class Button {}\n")
+            (app / "test").mkdir()
+            (app / "test" / "button_test.dart").write_text(
+                "import 'package:fimp_app/old/button.dart';\nvoid main() {}\n"
+            )
+            broken = (
+                "Analyzing fimp_app...\n\n"
+                "test/button_test.dart:1:8: Error: Target of URI doesn't exist: "
+                "'package:fimp_app/old/button.dart'.\n"
+                "import 'package:fimp_app/old/button.dart';\n"
+                "       ^^^^^^^^^^^^^^^^^^\n"
+                "1 issue found.\n"
+            )
+            env = self._fake_env(app, broken)
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("+ package:fimp_app/widgets/button.dart", result.stdout)
+            self.assertIn("import 'package:fimp_app/widgets/button.dart';",
+                          (app / "test/button_test.dart").read_text())
+
+    def test_ambiguous_basename_is_skipped_without_editing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib" / "a").mkdir()
+            (app / "lib" / "b").mkdir()
+            (app / "lib" / "a" / "dup.dart").write_text("A\n")
+            (app / "lib" / "b" / "dup.dart").write_text("B\n")
+            (app / "lib" / "main.dart").write_text(
+                "import './a/dup.dart';\nvoid main() {}\n"
+            )
+            broken = (
+                "Analyzing fimp_app...\n\n"
+                "lib/main.dart:1:8: Error: Target of URI doesn't exist: './a/dup.dart'.\n"
+                "import './a/dup.dart';\n"
+                "       ^^^^^^^^^^^^^^\n"
+                "1 issue found.\n"
+            )
+            env = self._fake_env(app, broken)
+            before = (app / "lib/main.dart").read_bytes()
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Ambiguous", result.stdout)
+            self.assertIn("lib/a/dup.dart", result.stdout)
+            self.assertIn("lib/b/dup.dart", result.stdout)
+            self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_parent_paths_with_spaces_work(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            parent = Path(raw).resolve() / "parent dir with spaces"
+            parent.mkdir()
+            app = self._app_with_moved_helper(parent)
+            env = self._fake_env(app, self.BROKEN_MAIN)
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("import './new/helper.dart' as h;",
+                          (app / "lib/main.dart").read_text())
+
+    def test_analyzer_startup_failure_is_not_nothing_to_repair(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            env = self._fake_env(
+                app, "flutter: command failed to start: crash", first_status=64
+            )
+            before = (app / "lib/main.dart").read_bytes()
+            result = self._run_fimp(app, env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("infrastructure failure", result.stdout + result.stderr)
+            self.assertNotIn("Nothing to repair", result.stdout)
+            self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_verification_failure_is_reported_and_edits_retained(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge fimp parent ") as raw:
+            app = self._app_with_moved_helper(Path(raw).resolve())
+            env = self._fake_env(
+                app, self.BROKEN_MAIN,
+                second_output="lib/main.dart:9:7: Error: getter not found\n1 issue found.",
+                second_status=1,
+            )
+            result = self._run_fimp(app, "--apply", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            combined = result.stdout + result.stderr
+            self.assertIn("Verification FAILED", combined)
+            self.assertIn("RETAINED", combined)
+            self.assertNotIn("passes after repair", combined)
+            # The applied edit is kept (no rollback).
+            self.assertIn("import './new/helper.dart' as h;",
+                          (app / "lib/main.dart").read_text())
+
+
+class TestShippedToolingAllowlist(unittest.TestCase):
+    """Generated apps ship EXACTLY the allowlisted scripts — no more.
+
+    The generator copies only `shippedScripts` from create_project.dart;
+    template-maintenance and personal tooling never reach an app.
+    """
+
+    ALLOWED_SCRIPTS = {
+        "fverify.sh",
+        "fgen.sh",
+        "fstr.sh",
+        "fl10n.sh",
+        "fanal.sh",
+        "fimp.sh",
+        "fdead.sh",
+        "fcheck.sh",
+        "sync_skills.sh",
+        "fimp.py",
+        "render_feature.py",
+        "feature_templates",
+    }
+    FORBIDDEN = {
+        "verify_template.sh",  # template maintenance
+        "fbuild.sh",  # personal
+        "pre_script_claude.sh",  # personal
+        "flutter_analyze_interceptor.py",  # retired
+    }
+
+    def _generate_fast_app(self, workdir: Path, name: str = "ship_app", generator: Path = GENERATOR) -> Path:
+        env, _ = fake_tool_env(workdir)
+        result = run_generator(["--no-open", name], cwd=workdir, env=env, generator=generator)
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        return workdir / name
+
+    def test_generated_app_ships_exactly_the_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
+            workdir = Path(raw).resolve()
+            app = self._generate_fast_app(workdir)
+            shipped = {path.name for path in (app / "scripts").iterdir()}
+            self.assertEqual(shipped, self.ALLOWED_SCRIPTS)
+            self.assertFalse((app / "tools").exists(), "test_template.py never ships")
+
+    def test_generated_scripts_are_executable(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
+            workdir = Path(raw).resolve()
+            app = self._generate_fast_app(workdir)
+            for name in self.ALLOWED_SCRIPTS:
+                if not name.endswith('.sh'):
+                    continue
+                with self.subTest(script=name):
+                    self.assertTrue(os.access(app / "scripts" / name, os.X_OK))
+
+    def test_new_script_in_template_does_not_automatically_ship(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
+            workdir = Path(raw).resolve()
+            template = workdir / "template"
+            shutil.copytree(REPO_ROOT, template, ignore=shutil.ignore_patterns(".git", ".dart_tool", "__pycache__"))
+            probe = template / "scripts" / "zzz_probe_do_not_ship.sh"
+            probe.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            app = self._generate_fast_app(workdir, generator=template / "create_project.dart")
+            self.assertFalse((app / "scripts" / probe.name).exists())
+            self.assertEqual({path.name for path in (app / "scripts").iterdir()}, self.ALLOWED_SCRIPTS)
+
+    def test_missing_required_script_fails_before_flutter_runs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
+            workdir = Path(raw).resolve()
+            template = workdir / "template"
+            shutil.copytree(REPO_ROOT, template, ignore=shutil.ignore_patterns(".git", ".dart_tool", "__pycache__"))
+            (template / "scripts/fverify.sh").unlink()
+            env, log = fake_tool_env(workdir, flutter_fail=True)
+            result = run_generator(["--no-open", "my_app"], cwd=workdir, env=env, generator=template / "create_project.dart")
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Required template entry is missing", result.stderr)
+            self.assertEqual(read_invocations(log), [], "flutter must not be invoked")
+
+    def test_missing_support_assets_fail_before_flutter_runs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
+            workdir = Path(raw).resolve()
+            template = workdir / "template"
+            shutil.copytree(REPO_ROOT, template, ignore=shutil.ignore_patterns(".git", ".dart_tool", "__pycache__"))
+            for relative in ("scripts/fimp.py", "scripts/feature_templates/cubit.dart.tpl"):
+                with self.subTest(asset=relative):
+                    path = template / relative
+                    saved = path.read_bytes()
+                    path.unlink()
+                    env, log = fake_tool_env(workdir)
+                    result = run_generator(["--no-open", "my_app"], cwd=workdir, env=env, generator=template / "create_project.dart")
+                    self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+                    self.assertEqual(read_invocations(log), [])
+                    path.write_bytes(saved)
+
+    def test_generated_app_has_standalone_ci_workflow(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
+            workdir = Path(raw).resolve()
+            app = self._generate_fast_app(workdir)
+            workflow = app / ".github" / "workflows" / "flutter-ci.yml"
+            self.assertTrue(workflow.exists(), "the app CI workflow must ship")
+            text = workflow.read_text()
+            # Generation precedes verification.
+            commands = [line.strip() for line in text.splitlines() if line.strip().startswith('run:')]
+            gen_position = commands.index('run: dart run build_runner build --delete-conflicting-outputs')
+            l10n_position = commands.index('run: flutter gen-l10n')
+            verify_position = commands.index('run: bash scripts/fverify.sh')
+            self.assertLess(l10n_position, verify_position)
+            self.assertLess(gen_position, verify_position)
+            # No references to the FlutterForge root harness.
+            self.assertNotIn("verify_template", text)
+            self.assertNotIn("test_template", text)
+            # Read-only, bounded, superseded runs cancelled.
+            self.assertIn("contents: read", text)
+            self.assertIn("timeout-minutes", text)
+            self.assertIn("cancel-in-progress", text)
+            # The repository's own template workflow is NOT copied.
+            self.assertFalse(
+                (app / ".github" / "workflows" / "template-verification.yml").exists()
+            )
 
 
 class TestVerifyTemplateScript(unittest.TestCase):
@@ -810,6 +1638,15 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
             cwd=cls.parent,
             timeout=SLOW_TIMEOUT,
         )
+        artifacts = os.environ.get("FORGE_ARTIFACTS_DIR")
+        if artifacts:
+            directory = Path(artifacts)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "creation.log").write_text(
+                cls.create_result.stdout + "\n--- stderr ---\n" + cls.create_result.stderr
+            )
+        if cls.create_result.returncode != 0:
+            raise AssertionError("Baseline generation failed; dependent smoke steps cannot run." + fmt(cls.create_result))
 
     def test_00_creation_succeeds_with_correct_metadata(self) -> None:
         result = self.create_result
@@ -895,6 +1732,78 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         self.assertEqual((self.app / "pubspec.yaml").read_bytes(), pubspec_before)
         retained = [p for p in self.parent.iterdir() if p.name.startswith(".flutterforge-stage-")]
         self.assertEqual(retained, [], "a refusal must not create staging directories")
+
+    def test_21_fimp_repairs_real_relative_imports_and_retains_failed_repairs(self) -> None:
+        """Real analyzer diagnostics, comments, lib/test relocations and exit status."""
+        files = {
+            "lib/core/tooling/repair_lib_helper.dart": "const int repairValue = 7;\n",
+            "lib/core/repair_consumer.dart": (
+                "/* import 'missing/repair_lib_helper.dart'; */\n"
+                "import 'missing/repair_lib_helper.dart'; // missing/repair_lib_helper.dart\n"
+                "int readRepairValue() => repairValue;\n"
+            ),
+            "test/support/repair_test_helper.dart": "const int repairTestValue = 9;\n",
+            "test/tooling/repair_probe_test.dart": (
+                "import 'package:flutter_test/flutter_test.dart';\n"
+                "import 'package:smoke_app/core/repair_consumer.dart';\n"
+                "import '../old/repair_test_helper.dart';\n"
+                "void main() {\n"
+                "  test('repaired imports execute', () {\n"
+                "    expect(readRepairValue(), 7);\n"
+                "    expect(repairTestValue, 9);\n"
+                "  });\n"
+                "}\n"
+            ),
+        }
+        paths = [self.app / relative for relative in files]
+        try:
+            for relative, source in files.items():
+                path = self.app / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source)
+            snapshot = {path: path.read_bytes() for path in paths}
+            preview = run_command(["bash", "scripts/fimp.sh"], cwd=self.app, timeout=SLOW_TIMEOUT)
+            self.assertEqual(preview.returncode, 0, msg=fmt(preview))
+            self.assertEqual({path: path.read_bytes() for path in paths}, snapshot)
+            applied = run_command(["bash", "scripts/fimp.sh", "--apply"], cwd=self.app, timeout=SLOW_TIMEOUT)
+            self.assertEqual(applied.returncode, 0, msg=fmt(applied))
+            consumer = self.app / "lib/core/repair_consumer.dart"
+            self.assertIn("import 'tooling/repair_lib_helper.dart'; // missing/repair_lib_helper.dart", consumer.read_text())
+            self.assertIn("/* import 'missing/repair_lib_helper.dart'; */", consumer.read_text())
+            self.assertIn("import '../support/repair_test_helper.dart';", paths[-1].read_text())
+            execution = run_command(["flutter", "test", "test/tooling/repair_probe_test.dart"], cwd=self.app, timeout=SLOW_TIMEOUT)
+            self.assertEqual(execution.returncode, 0, msg=fmt(execution))
+            consumer.write_text(files["lib/core/repair_consumer.dart"] + "const String unrelatedError = 123;\n")
+            failed = run_command(["bash", "scripts/fimp.sh", "--apply"], cwd=self.app, timeout=SLOW_TIMEOUT)
+            self.assertNotEqual(failed.returncode, 0, msg=fmt(failed))
+            self.assertIn("RETAINED", failed.stdout)
+            self.assertIn("import 'tooling/repair_lib_helper.dart';", consumer.read_text())
+        finally:
+            for path in paths:
+                path.unlink(missing_ok=True)
+            for relative in ("lib/core/tooling", "test/tooling"):
+                directory = self.app / relative
+                if directory.exists() and not any(directory.iterdir()):
+                    directory.rmdir()
+
+    def test_22_fstr_generates_real_unicode_placeholder_localizations(self) -> None:
+        paths = [self.app / f"lib/core/l10n/app_localizations_{locale}.arb" for locale in ("fr", "en")]
+        original = {path: path.read_bytes() for path in paths}
+        try:
+            result = run_command([
+                "bash", "scripts/fstr.sh", "toolingProbeGreeting",
+                "Bonjour {name}, café !", "Hello {name}, café!",
+            ], cwd=self.app, timeout=SLOW_TIMEOUT)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            for path, expected in zip(paths, ("Bonjour {name}, café !", "Hello {name}, café!")):
+                self.assertEqual(json.loads(path.read_text())["toolingProbeGreeting"], expected)
+            generated = self.app / "lib/core/l10n/generated/app_localizations.dart"
+            self.assertIn("toolingProbeGreeting", generated.read_text())
+        finally:
+            for path, content in original.items():
+                path.write_bytes(content)
+            result = run_command(["flutter", "gen-l10n"], cwd=self.app, timeout=SLOW_TIMEOUT)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
 
     def test_30_fgen_generates_lean_feature_with_normalized_name(self) -> None:
         """Lean default: no service, no DTO, but repository failure tests exist."""
@@ -1043,6 +1952,7 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         )
 
     def test_32_app_with_generated_features_passes_fverify(self) -> None:
+        self._prepare_app(self.app)
         result = run_command(["bash", "scripts/fverify.sh"], cwd=self.app, timeout=SLOW_TIMEOUT)
         self.assertEqual(result.returncode, 0, msg=fmt(result))
 
@@ -1260,6 +2170,7 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=fmt(result))
 
     def test_51_wired_app_passes_fverify(self) -> None:
+        self._prepare_app(self.app)
         result = run_command(["bash", "scripts/fverify.sh"], cwd=self.app, timeout=SLOW_TIMEOUT)
         self.assertEqual(result.returncode, 0, msg=fmt(result))
 
@@ -1282,6 +2193,7 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         self.assertEqual(first.returncode, 0, msg=fmt(first))
         self.assertFalse((fresh / "lib/features/counter").exists())
         self.assertFalse((fresh / "test/features/counter").exists())
+        self._prepare_app(fresh)
         verify1 = run_command(["bash", "scripts/fverify.sh"], cwd=fresh, timeout=SLOW_TIMEOUT)
         self.assertEqual(verify1.returncode, 0, msg=fmt(verify1))
         locator = (fresh / "lib/core/di/service_locator.dart").read_text()
@@ -1292,10 +2204,16 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         second = run_command(["bash", "remove_counter.sh"], cwd=fresh, timeout=SLOW_TIMEOUT)
         self.assertEqual(second.returncode, 0, msg=fmt(second))
         self.assertEqual(tree_snapshot(fresh / "lib"), snapshot)
+        self._prepare_app(fresh)
         verify2 = run_command(["bash", "scripts/fverify.sh"], cwd=fresh, timeout=SLOW_TIMEOUT)
         self.assertEqual(verify2.returncode, 0, msg=fmt(verify2))
 
     # -- Full-workflow step 7: skill synchronization, check-only ----------------
+
+    def _prepare_app(self, app: Path) -> None:
+        for command in (["dart", "fix", "--apply"], ["dart", "format", "."]):
+            result = run_command(command, cwd=app, timeout=SLOW_TIMEOUT)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
 
     def test_70_skill_synchronization_check_only(self) -> None:
         result = run_command(

@@ -63,7 +63,8 @@ if [ ! -z "$1" ]; then
         if companion_is_required "$PACKAGE_NAME"; then
             echo "⚠️  But it is a codegen companion — its generator uses it. KEEP it."
         else
-            echo "You can probably remove it from pubspec.yaml"
+            echo "Review indirect usage, exports, code generation, assets and platform channels before changing this dependency."
+            echo "This scan does not establish that the package is removable."
         fi
     fi
     exit 0

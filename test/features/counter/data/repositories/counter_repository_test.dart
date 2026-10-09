@@ -148,7 +148,33 @@ void main() {
 
         await repository.saveSettings(settings);
 
-        verify(() => mockDataSource.saveSettings(any())).called(1);
+        // Inspect what was actually saved: the DTO must carry every field.
+        final List<dynamic> captured = verify(
+          () => mockDataSource.saveSettings(captureAny()),
+        ).captured;
+        expect(captured, hasLength(1));
+        final CounterSettingsDto saved = captured.single as CounterSettingsDto;
+        expect(saved.stepSize, 4);
+        expect(saved.minValue, -5);
+        expect(saved.maxValue, 50);
+      });
+
+      test('persists milestone settings to the data source', () async {
+        const CounterSettings settings = CounterSettings(
+          stepSize: 1,
+          showMilestones: true,
+          milestoneInterval: 7,
+        );
+        when(() => mockDataSource.saveSettings(any())).thenAnswer((_) async {});
+
+        await repository.saveSettings(settings);
+
+        final List<dynamic> captured = verify(
+          () => mockDataSource.saveSettings(captureAny()),
+        ).captured;
+        final CounterSettingsDto saved = captured.single as CounterSettingsDto;
+        expect(saved.showMilestones, true);
+        expect(saved.milestoneInterval, 7);
       });
     });
   });

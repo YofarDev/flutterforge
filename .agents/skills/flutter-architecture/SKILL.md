@@ -58,6 +58,10 @@ lib/
 
 **Cross-feature rule:** Features should not import each other's internals. Shared infrastructure can live in `core/`; shared business capabilities should expose a small public API or move to a dedicated module/package instead of turning `core/` into a dumping ground.
 
+Feature dependencies must be acyclic, including access through public barrels
+and conditional directives. Resolve a cycle by moving a shared contract into a
+dedicated shared module or changing ownership; do not bypass the public API rule.
+
 ## Modularity Beyond Folders
 
 Start with feature folders inside one app package. Extract a feature into a Dart/Flutter package only when it has a stable public API, meaningful independent tests, or needs to be reused across apps.
@@ -521,7 +525,9 @@ Signs a file does **not** need splitting:
 
 - dependencies flow inward (`presentation → domain ← data`)
 - domain purity (domain imports nothing from data/presentation)
+- domain purity through re-export chains: importing a local barrel that re-exports a forbidden dependency (a Flutter UI library, l10n, router, DI, theme, logger, or data/presentation internals) is forbidden too — even when a `show` clause narrows the symbols. Reached generated libraries and all conditional branches are traversed; generated declarations remain exempt from standalone rules. Scoped to app-local re-export chains ending in known forbidden targets; third-party package internals are not audited exhaustively.
 - cross-feature access via a feature's public barrel only (barrels re-export nothing internal)
+- acyclic feature dependencies (`feature-dependency-cycle`), including public-barrel and conditional import/export edges
 - `core/` never imports feature internals
 - no cubit/bloc stored as a field of another cubit/bloc/service (type-based)
 - `getIt` resolved only from the allowlist (`app.dart`, `service_locator.dart`, `app_router.dart`; `main.dart` may additionally *import* `service_locator.dart` for bootstrap)

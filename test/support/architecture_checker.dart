@@ -194,8 +194,16 @@ class _AnalyzerRun {
   final List<CheckerError> errors = <CheckerError>[];
   final Map<String, ResolvedUnitResult> _resolved =
       <String, ResolvedUnitResult>{};
+
+  /// Feature dependency graph: feature → (feature → first directive that
+  /// created the edge). Populated from statically visible cross-feature
+  /// imports/exports/parts, including every conditional branch.
+  final Map<String, Map<String, _FeatureEdge>> _featureGraph =
+      <String, Map<String, _FeatureEdge>>{};
+
   late final String rootPath;
   late final String packageName;
+  late final AnalysisSession _session;
 
   CheckerResult get result =>
       CheckerResult(violations: violations, errors: errors);
@@ -227,6 +235,7 @@ class _AnalyzerRun {
       final AnalysisSession session = collection
           .contextFor(rootPath)
           .currentSession;
+      _session = session;
       for (final String path in checkable) {
         final SomeResolvedUnitResult someResult = await session.getResolvedUnit(
           path,
@@ -262,15 +271,152 @@ class _AnalyzerRun {
 
       // Rule evaluation runs even for files with errors (more findings is
       // better), but the caller must still fail on errors.
-      for (final String path in _resolved.keys) {
-        _checkFile(path);
+      // Traversal may resolve generated libraries on demand. Their own
+      // declarations remain exempt; only the original handwritten set is run.
+      for (final String path in List<String>.of(_resolved.keys)) {
+        await _checkFile(path);
       }
+
+      // Whole-graph rules run once every file has been seen.
+      _detectFeatureCycles();
     } finally {
       await collection.dispose();
     }
   }
 
-  void _checkFile(String path) {
+  void _recordFeatureEdge(
+    String fromFeature,
+    String toFeature,
+    String importerPath,
+    int line,
+  ) {
+    final Map<String, _FeatureEdge> outgoing = _featureGraph.putIfAbsent(
+      fromFeature,
+      () => <String, _FeatureEdge>{},
+    );
+    outgoing.putIfAbsent(
+      toFeature,
+      () => _FeatureEdge(path: importerPath, line: line),
+    );
+  }
+
+  /// Feature-cycle detection: features are graph nodes; statically visible
+  /// cross-feature imports/exports/parts (including every conditional branch)
+  /// are edges. A strongly connected component with more than one feature is
+  /// a cycle — public-barrel access does not conceal it. Findings are
+  /// deterministic (sorted nodes, smallest-first cycle) and deduplicated by
+  /// edge, so repeated imports never produce duplicate diagnostics.
+  void _detectFeatureCycles() {
+    final List<String> nodes = _featureGraph.keys.toList()..sort();
+    final Map<String, int> index = <String, int>{};
+    final Map<String, int> low = <String, int>{};
+    final List<String> stack = <String>[];
+    final Set<String> onStack = <String>{};
+    final List<List<String>> components = <List<String>>[];
+    int counter = 0;
+
+    void strongConnect(String node) {
+      index[node] = counter;
+      low[node] = counter;
+      counter++;
+      stack.add(node);
+      onStack.add(node);
+      final List<String> successors =
+          (_featureGraph[node] ?? const <String, _FeatureEdge>{}).keys.toList()
+            ..sort();
+      for (final String successor in successors) {
+        if (!index.containsKey(successor)) {
+          strongConnect(successor);
+          low[node] = low[node]! < low[successor]!
+              ? low[node]!
+              : low[successor]!;
+        } else if (onStack.contains(successor)) {
+          low[node] = low[node]! < index[successor]!
+              ? low[node]!
+              : index[successor]!;
+        }
+      }
+      if (low[node] == index[node]) {
+        final List<String> component = <String>[];
+        while (true) {
+          final String member = stack.removeLast();
+          onStack.remove(member);
+          component.add(member);
+          if (member == node) {
+            break;
+          }
+        }
+        components.add(component);
+      }
+    }
+
+    for (final String node in nodes) {
+      if (!index.containsKey(node)) {
+        strongConnect(node);
+      }
+    }
+
+    for (final List<String> component in components) {
+      if (component.length < 2) {
+        continue; // single-feature components cannot be a cycle
+      }
+      component.sort();
+      final List<String> cycle = _deterministicCycle(component);
+      final _FeatureEdge? firstHop = _featureGraph[cycle.first]?[cycle[1]];
+      violations.add(
+        ArchitectureViolation(
+          ruleId: 'feature-dependency-cycle',
+          path: firstHop?.path ?? _relative(rootPath),
+          line: firstHop?.line ?? 1,
+          explanation:
+              'features form a dependency cycle: ${cycle.join(' → ')} '
+              '(strongly connected features: ${component.join(', ')}) — '
+              'public-barrel access remains subject to acyclic feature '
+              'dependencies',
+        ),
+      );
+    }
+  }
+
+  /// A deterministic simple cycle through [component]: smallest-first DFS
+  /// from the alphabetically first feature, always taking the smallest
+  /// successor within the component. The component is strongly connected,
+  /// so a cycle back to the start exists.
+  List<String> _deterministicCycle(List<String> component) {
+    final Set<String> members = component.toSet();
+    final String start = component.first;
+    final List<String> path = <String>[start];
+    final Set<String> visited = <String>{start};
+
+    bool walk(String node) {
+      final List<String> successors =
+          (_featureGraph[node] ?? const <String, _FeatureEdge>{}).keys.toList()
+            ..sort();
+      for (final String successor in successors) {
+        if (successor == start && path.length >= 2) {
+          path.add(start);
+          return true;
+        }
+        if (members.contains(successor) && !visited.contains(successor)) {
+          visited.add(successor);
+          path.add(successor);
+          if (walk(successor)) {
+            return true;
+          }
+          path.removeLast();
+          visited.remove(successor);
+        }
+      }
+      return false;
+    }
+
+    if (!walk(start)) {
+      path.add(start); // unreachable for a genuine SCC; keeps reporting valid
+    }
+    return path;
+  }
+
+  Future<void> _checkFile(String path) async {
     final ResolvedUnitResult result = _resolved[path]!;
     final _FileClassification importer = _classifyFile(_relative(path));
 
@@ -280,15 +426,21 @@ class _AnalyzerRun {
     for (final Directive directive in result.unit.directives) {
       if (directive is ImportDirective) {
         _checkDirective(importer, path, directive);
+        if (importer.isDomainLike) {
+          await _checkDomainImportChain(path, directive);
+        }
       } else if (directive is ExportDirective) {
         _checkDirective(importer, path, directive);
         if (importer.isPublicBarrel) {
-          _checkBarrelExportChain(path, directive);
+          await _checkBarrelExportChain(path, directive);
+        }
+        if (importer.isDomainLike) {
+          await _checkDomainImportChain(path, directive);
         }
       } else if (directive is PartDirective) {
         _checkDirective(importer, path, directive);
         if (importer.isPublicBarrel) {
-          _checkBarrelExportChain(path, directive);
+          await _checkBarrelExportChain(path, directive);
         }
       } else if (directive is PartOfDirective) {
         // Reverse direction: the library named by `part of` includes this
@@ -429,6 +581,12 @@ class _AnalyzerRun {
     // Rule: cross-feature access.
     if (importer.feature != null && target.feature != null) {
       if (importer.feature != target.feature) {
+        _recordFeatureEdge(
+          importer.feature!,
+          target.feature!,
+          importer.path,
+          line,
+        );
         final String publicBarrel =
             'lib/features/${target.feature}/${target.feature}.dart';
         if (_relative(targetPath) != publicBarrel) {
@@ -466,7 +624,10 @@ class _AnalyzerRun {
   /// A public barrel may only expose domain files — follow transitive export
   /// chains (including every conditional branch) so a domain file re-exporting
   /// data cannot smuggle it through, on any platform configuration.
-  void _checkBarrelExportChain(String barrelPath, UriBasedDirective directive) {
+  Future<void> _checkBarrelExportChain(
+    String barrelPath,
+    UriBasedDirective directive,
+  ) async {
     final int line = _lineOf(_resolved[barrelPath]!, directive.offset);
     final List<String> toVisit = <String>[];
     for (final String uri in _directiveUris(directive)) {
@@ -496,7 +657,7 @@ class _AnalyzerRun {
         );
       }
       // Follow the file's own export directives transitively.
-      final ResolvedUnitResult? unitResult = _resolved[current];
+      final ResolvedUnitResult? unitResult = await _unitForTraversal(current);
       if (unitResult == null) {
         continue;
       }
@@ -513,6 +674,123 @@ class _AnalyzerRun {
         }
       }
     }
+  }
+
+  /// Domain purity through re-export chains: a domain file (or public
+  /// domain barrel) that imports a local library which — transitively,
+  /// through ANY conditional export branch — re-exports a forbidden
+  /// dependency violates domain-purity, even when a `show` clause narrows
+  /// the symbols. The reported explanation carries the full chain, e.g.
+  /// `domain/model.dart → core/shared.dart → package:flutter/material.dart`.
+  ///
+  /// Scoped by design to app-local re-export chains ending in KNOWN
+  /// forbidden targets (Flutter UI libraries and forbidden app files);
+  /// third-party package internals are not audited exhaustively.
+  Future<void> _checkDomainImportChain(
+    String importerPath,
+    UriBasedDirective directive,
+  ) async {
+    final int line = _lineOf(_resolved[importerPath]!, directive.offset);
+    final List<List<String>> toVisit = <List<String>>[];
+    for (final String uri in _directiveUris(directive)) {
+      final String? target = _resolveTarget(importerPath, uri);
+      if (target != null) {
+        toVisit.add(<String>[target]);
+      }
+    }
+    final Set<String> visited = <String>{};
+    while (toVisit.isNotEmpty) {
+      final List<String> chain = toVisit.removeLast();
+      final String current = chain.last;
+      if (!visited.add(current)) {
+        continue; // cyclic pure exports terminate here
+      }
+      final ResolvedUnitResult? unitResult = await _unitForTraversal(current);
+      if (unitResult == null) {
+        continue; // _unitForTraversal records resolution errors (fail closed).
+      }
+      for (final Directive nested in unitResult.unit.directives) {
+        if (nested is! ExportDirective && nested is! PartDirective) {
+          continue;
+        }
+        for (final String uri in _directiveUris(nested as UriBasedDirective)) {
+          final String? next = _resolveTarget(current, uri);
+          if (next != null) {
+            final _FileClassification target = _classifyFile(_relative(next));
+            if (_isDomainForbiddenAppPath(target.path) ||
+                target.layer == _Layer.data ||
+                target.layer == _Layer.presentation) {
+              _reportChainViolation(importerPath, line, <String>[
+                ...chain.map(_relative),
+                _relative(next),
+              ]);
+            } else {
+              toVisit.add(<String>[...chain, next]);
+            }
+          } else if (_isFlutterUiImport(uri)) {
+            _reportChainViolation(importerPath, line, <String>[
+              ...chain.map(_relative),
+              uri,
+            ]);
+          }
+        }
+      }
+    }
+  }
+
+  /// Generated files are exempt from standalone declaration rules, but cannot
+  /// conceal a dependency reached from a handwritten domain/public barrel.
+  /// Resolve reached units (including unselected conditional branches) on
+  /// demand and cache them for the rest of this analysis pass.
+  Future<ResolvedUnitResult?> _unitForTraversal(String path) async {
+    final ResolvedUnitResult? cached = _resolved[path];
+    if (cached != null) {
+      return cached;
+    }
+    final SomeResolvedUnitResult result = await _session.getResolvedUnit(path);
+    if (result is! ResolvedUnitResult) {
+      errors.add(
+        CheckerError(
+          path: _relative(path),
+          message:
+              'Could not resolve a library reached through an export chain.',
+        ),
+      );
+      return null;
+    }
+    _resolved[path] = result;
+    for (final Diagnostic diagnostic in result.diagnostics) {
+      if (diagnostic.severity == Severity.error) {
+        errors.add(
+          CheckerError(
+            path: _relative(path),
+            message:
+                '${diagnostic.diagnosticCode.lowerCaseName} at line '
+                '${_lineOf(result, diagnostic.offset)}: '
+                '${diagnostic.problemMessage.messageText(includeUrl: false)}',
+          ),
+        );
+      }
+    }
+    return result;
+  }
+
+  void _reportChainViolation(
+    String importerPath,
+    int line,
+    List<String> chain,
+  ) {
+    violations.add(
+      ArchitectureViolation(
+        ruleId: 'domain-purity',
+        path: _relative(importerPath),
+        line: line,
+        explanation:
+            'domain depends on ${chain.last} through a re-export chain '
+            '(${chain.join(' → ')}) — importing a barrel that re-exports a '
+            'forbidden dependency is forbidden, even behind a show clause',
+      ),
+    );
   }
 
   /// `part of` with a file URI: the named library includes this part file, so
@@ -771,6 +1049,15 @@ class _RuleVisitor extends RecursiveAstVisitor<void> {
 
 enum _Layer { none, data, domain, presentation }
 
+/// The first directive observed to create a feature→feature edge; used to
+/// report cycles at the source directive that participates in them.
+final class _FeatureEdge {
+  const _FeatureEdge({required this.path, required this.line});
+
+  final String path;
+  final int line;
+}
+
 /// Classification of one app file by its normalized app-relative path.
 final class _FileClassification {
   const _FileClassification({
@@ -837,9 +1124,9 @@ _FileClassification _classifyFile(String appRelativePath) {
   );
 }
 
-/// Generated-file policy: generated implementation files are excluded from
-/// checking (their content is machine-owned); every handwritten import and
-/// declaration is still checked.
+/// Generated-file policy: machine-owned declarations are exempt from standalone
+/// rules. Re-export chains reached from handwritten domain files or public
+/// barrels still traverse generated libraries and fail on resolution errors.
 bool _isGeneratedFile(String path) {
   final String normalized = _normalizePath(path);
   return normalized.endsWith('.g.dart') ||

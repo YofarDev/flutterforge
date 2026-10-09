@@ -209,6 +209,22 @@ echo -e "${BLUE}   Project: ${GREEN}$PROJECT_NAME${NC}"
 echo -e "${BLUE}   App root: ${GREEN}$APP_ROOT${NC}"
 echo -e "${BLUE}   Layout: ${GREEN}lean$( [ "$WITH_SERVICE" = true ] && printf ' + service' )$( [ "$WITH_DTO" = true ] && printf ' + dto' )${NC}"
 
+# Templates are explicit shipped assets; render data without shell evaluation.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE_DIR="$SCRIPT_DIR/feature_templates"
+for template in domain_model.dart.tpl repository_contract.dart.tpl domain_service.dart.tpl remote_datasource.dart.tpl dto.dart.tpl repository_impl_imports.dart.tpl repository_impl_dto_import.dart.tpl repository_impl_body.dart.tpl state.dart.tpl cubit.dart.tpl screen.dart.tpl repository_test_imports.dart.tpl repository_test_dto_import.dart.tpl repository_test_setup.dart.tpl repository_test_dto_result.dart.tpl repository_test_domain_result.dart.tpl repository_test_body.dart.tpl dto_test.dart.tpl service_test.dart.tpl cubit_test.dart.tpl screen_test.dart.tpl; do
+    if [ ! -f "$TEMPLATE_DIR/$template" ]; then
+        err "Required feature template missing: $template"
+        exit 1
+    fi
+done
+[ -f "$SCRIPT_DIR/render_feature.py" ] || { err "Feature renderer missing."; exit 1; }
+render_template() {
+    local template="$1"
+    shift
+    uv run --no-project "$SCRIPT_DIR/render_feature.py" "$TEMPLATE_DIR/$template" "$@"
+}
+
 # --- 5. Render into an owned temporary directory ------------------------------------
 
 mkdir -p "$APP_ROOT/.dart_tool"
@@ -225,7 +241,7 @@ echo -e "${BLUE}📂 Rendering directories...${NC}"
 # NOTE: every path is quoted and passed as a single argument. Do NOT collect
 # the optional directories into an unquoted variable for word splitting — an
 # app root containing spaces would silently create wrong directories and the
-# later heredoc writes would fail with "No such file or directory".
+# later template writes would fail with "No such file or directory".
 mkdir -p \
     "$STAGE_LIB/data/datasources" \
     "$STAGE_LIB/data/repositories" \
@@ -247,58 +263,14 @@ fi
 # The domain model is the app's representation. Without --with-dto there is no
 # transport schema to serialize against, so no fromJson/$...g.dart is emitted;
 # add one only when the domain model itself must cross a persistence boundary.
-cat > "$STAGE_LIB/domain/models/${FEATURE_SNAKE}.dart" <<EOF
-import 'package:freezed_annotation/freezed_annotation.dart';
-
-part '${FEATURE_SNAKE}.freezed.dart';
-
-@freezed
-sealed class ${FEATURE_PASCAL} with _\$${FEATURE_PASCAL} {
-  const factory ${FEATURE_PASCAL}({
-    required String id,
-    @Default('') String name,
-  }) = _${FEATURE_PASCAL};
-}
-EOF
+render_template domain_model.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/domain/models/${FEATURE_SNAKE}.dart"
 
 # --- 7. Domain Layer: Repository Interface ---
-cat > "$STAGE_LIB/domain/repositories/${FEATURE_SNAKE}_repository.dart" <<EOF
-import 'package:fpdart/fpdart.dart';
-
-import '../../../../core/models/failure.dart';
-import '../models/${FEATURE_SNAKE}.dart';
-
-abstract class I${FEATURE_PASCAL}Repository {
-  Future<Either<Failure, ${FEATURE_PASCAL}>> getData();
-}
-EOF
+render_template repository_contract.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/domain/repositories/${FEATURE_SNAKE}_repository.dart"
 
 # --- 8. Domain Layer: Service (only with --with-service) ------------------------------
 if [ "$WITH_SERVICE" = true ]; then
-    cat > "$STAGE_LIB/domain/services/${FEATURE_SNAKE}_service.dart" <<EOF
-import 'package:fpdart/fpdart.dart';
-
-import '../../../../core/models/failure.dart';
-import '../models/${FEATURE_SNAKE}.dart';
-import '../repositories/${FEATURE_SNAKE}_repository.dart';
-
-/// PLACEHOLDER domain service.
-///
-/// A service earns its place by owning actual rules or coordination (see
-/// CounterService in the template). Right now this class only forwards to the
-/// repository: either grow it into real domain logic, or delete it and let
-/// the cubit depend on I${FEATURE_PASCAL}Repository directly. A forwarding
-/// service is NOT mandatory architecture.
-class ${FEATURE_PASCAL}Service {
-  final I${FEATURE_PASCAL}Repository _repository;
-
-  ${FEATURE_PASCAL}Service(this._repository);
-
-  Future<Either<Failure, ${FEATURE_PASCAL}>> getData() {
-    return _repository.getData();
-  }
-}
-EOF
+    render_template domain_service.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/domain/services/${FEATURE_SNAKE}_service.dart"
 fi
 
 # --- 9. Data Layer: Data Source (interface + placeholder implementation) --------------
@@ -319,58 +291,11 @@ if [ "$WITH_DTO" = true ]; then
     DATA_SOURCE_RETURN_DOC="// Returns the transport DTO; the repository maps it to the domain model
     // inside its guarded boundary."
 fi
-cat > "$STAGE_LIB/data/datasources/${FEATURE_SNAKE}_remote_datasource.dart" <<EOF
-$DATA_SOURCE_IMPORTS
-
-abstract class I${FEATURE_PASCAL}RemoteDataSource {
-  Future<$DATA_SOURCE_RETURN_TYPE> getData();
-}
-
-class ${FEATURE_PASCAL}RemoteDataSource implements I${FEATURE_PASCAL}RemoteDataSource {
-  @override
-  Future<$DATA_SOURCE_RETURN_TYPE> getData() async {
-    $DATA_SOURCE_RETURN_DOC
-    // TODO: Implement the real remote call.
-    return $DATA_SOURCE_CONSTRUCTION;
-  }
-}
-EOF
+render_template remote_datasource.dart.tpl DATA_SOURCE_CONSTRUCTION "$DATA_SOURCE_CONSTRUCTION" DATA_SOURCE_IMPORTS "$DATA_SOURCE_IMPORTS" DATA_SOURCE_RETURN_DOC "$DATA_SOURCE_RETURN_DOC" DATA_SOURCE_RETURN_TYPE "$DATA_SOURCE_RETURN_TYPE" FEATURE_PASCAL "$FEATURE_PASCAL" > "$STAGE_LIB/data/datasources/${FEATURE_SNAKE}_remote_datasource.dart"
 
 # --- 10. Data Layer: DTO (only with --with-dto) ---------------------------------------
 if [ "$WITH_DTO" = true ]; then
-    cat > "$STAGE_LIB/data/models/${FEATURE_SNAKE}_dto.dart" <<EOF
-import 'package:freezed_annotation/freezed_annotation.dart';
-
-import '../../domain/models/${FEATURE_SNAKE}.dart';
-
-part '${FEATURE_SNAKE}_dto.freezed.dart';
-part '${FEATURE_SNAKE}_dto.g.dart';
-
-/// Transport representation. The domain model does not know this class
-/// exists: serialization and transport-specific shapes stay in the data
-/// layer. Keep the conversion total and guarded — malformed payloads must
-/// surface as typed failures at the repository boundary, never as exceptions
-/// escaping into the domain.
-@freezed
-sealed class ${FEATURE_PASCAL}Dto with _\$${FEATURE_PASCAL}Dto {
-  const factory ${FEATURE_PASCAL}Dto({
-    required String id,
-    required String name,
-  }) = _${FEATURE_PASCAL}Dto;
-
-  factory ${FEATURE_PASCAL}Dto.fromJson(Map<String, dynamic> json) =>
-      _\$${FEATURE_PASCAL}DtoFromJson(json);
-
-  const ${FEATURE_PASCAL}Dto._();
-
-  ${FEATURE_PASCAL} toDomain() {
-    return ${FEATURE_PASCAL}(
-      id: id,
-      name: name,
-    );
-  }
-}
-EOF
+    render_template dto.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/data/models/${FEATURE_SNAKE}_dto.dart"
 fi
 
 # --- 11. Data Layer: Repository Implementation -----------------------------------------
@@ -384,65 +309,14 @@ if [ "$WITH_DTO" = true ]; then
       // become a typed failure instead of escaping as an exception.
       final ${FEATURE_PASCAL} data = dto.toDomain();"
 fi
-cat > "$STAGE_LIB/data/repositories/${FEATURE_SNAKE}_repository_impl.dart" <<EOF
-import 'package:fpdart/fpdart.dart';
-
-import '../../../../core/errors/exception_mapper.dart';
-import '../../../../core/models/failure.dart';
-import '../../domain/repositories/${FEATURE_SNAKE}_repository.dart';
-import '../../domain/models/${FEATURE_SNAKE}.dart';
-import '../datasources/${FEATURE_SNAKE}_remote_datasource.dart';
-EOF
+render_template repository_impl_imports.dart.tpl FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/data/repositories/${FEATURE_SNAKE}_repository_impl.dart"
 if [ "$WITH_DTO" = true ]; then
-    cat >> "$STAGE_LIB/data/repositories/${FEATURE_SNAKE}_repository_impl.dart" <<EOF
-import '../models/${FEATURE_SNAKE}_dto.dart';
-EOF
+    render_template repository_impl_dto_import.dart.tpl FEATURE_SNAKE "$FEATURE_SNAKE" >> "$STAGE_LIB/data/repositories/${FEATURE_SNAKE}_repository_impl.dart"
 fi
-cat >> "$STAGE_LIB/data/repositories/${FEATURE_SNAKE}_repository_impl.dart" <<EOF
-
-class ${FEATURE_PASCAL}Repository implements I${FEATURE_PASCAL}Repository {
-  final I${FEATURE_PASCAL}RemoteDataSource _dataSource;
-
-  ${FEATURE_PASCAL}Repository(this._dataSource);
-
-  @override
-  Future<Either<Failure, ${FEATURE_PASCAL}>> getData() async {
-    try {
-$REPO_BODY_LINES
-      return Right<Failure, ${FEATURE_PASCAL}>(data);
-    } catch (e, st) {
-      // Logs the error and stack trace once, at the mapping boundary.
-      return Left<Failure, ${FEATURE_PASCAL}>(
-        mapExceptionToFailure(e, stackTrace: st, tag: '${FEATURE_PASCAL}Repository'),
-      );
-    }
-  }
-}
-EOF
+render_template repository_impl_body.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" REPO_BODY_LINES "$REPO_BODY_LINES" >> "$STAGE_LIB/data/repositories/${FEATURE_SNAKE}_repository_impl.dart"
 
 # --- 12. Presentation Layer: State ---
-cat > "$STAGE_LIB/presentation/bloc/${FEATURE_SNAKE}_state.dart" <<EOF
-library;
-
-import 'package:freezed_annotation/freezed_annotation.dart';
-
-import '../../../../core/models/failure.dart';
-import '../../domain/models/${FEATURE_SNAKE}.dart';
-
-part '${FEATURE_SNAKE}_state.freezed.dart';
-
-/// Union-state idiom for a load-lifecycle screen — see the
-/// flutter-architecture skill for when to use this vs a flat state.
-/// The error state carries the typed Failure, not a message: the UI derives
-/// text at build time via core/l10n/failure_localization.dart.
-@freezed
-sealed class ${FEATURE_PASCAL}State with _\$${FEATURE_PASCAL}State {
-  const factory ${FEATURE_PASCAL}State.initial() = _Initial;
-  const factory ${FEATURE_PASCAL}State.loading() = _Loading;
-  const factory ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL} data) = _Loaded;
-  const factory ${FEATURE_PASCAL}State.error({required Failure failure}) = _Error;
-}
-EOF
+render_template state.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/presentation/bloc/${FEATURE_SNAKE}_state.dart"
 
 # --- 13. Presentation Layer: Cubit ------------------------------------------------------
 # The cubit depends on the repository interface directly (lean default) or on
@@ -453,288 +327,35 @@ if [ "$WITH_SERVICE" = true ]; then
     CUBIT_DEP_TYPE="${FEATURE_PASCAL}Service"
     CUBIT_DEP_IMPORT="'../../domain/services/${FEATURE_SNAKE}_service.dart'"
 fi
-cat > "$STAGE_LIB/presentation/bloc/${FEATURE_SNAKE}_cubit.dart" <<EOF
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:fpdart/fpdart.dart';
-
-import '../../../../core/models/failure.dart';
-import '../../domain/models/${FEATURE_SNAKE}.dart';
-import $CUBIT_DEP_IMPORT;
-import '${FEATURE_SNAKE}_state.dart';
-
-class ${FEATURE_PASCAL}Cubit extends Cubit<${FEATURE_PASCAL}State> {
-  final $CUBIT_DEP_TYPE _source;
-
-  /// Monotonically increasing identifier for read requests (latest-request-wins):
-  /// each accepted request captures its identifier before awaiting, and after
-  /// the await only the newest request may emit.
-  int _requestId = 0;
-
-  ${FEATURE_PASCAL}Cubit(this._source) : super(const ${FEATURE_PASCAL}State.initial());
-
-  Future<void> loadData() async {
-    // A request invoked after close must not emit (emit on a closed cubit
-    // throws a StateError).
-    if (isClosed) {
-      return;
-    }
-
-    final int requestId = ++_requestId;
-    emit(const ${FEATURE_PASCAL}State.loading());
-
-    // Note: ignoring a stale result does not cancel its underlying network
-    // request. Add transport-level cancellation only if a data source needs it.
-    final Either<Failure, ${FEATURE_PASCAL}> result = await _source.getData();
-
-    // Check before processing EITHER a success or a failure: after close,
-    // emitting throws; and a stale (superseded) result must never overwrite a
-    // newer request's state.
-    if (isClosed || requestId != _requestId) {
-      return;
-    }
-
-    result.fold(
-      (Failure failure) => emit(${FEATURE_PASCAL}State.error(failure: failure)),
-      (${FEATURE_PASCAL} data) => emit(${FEATURE_PASCAL}State.loaded(data)),
-    );
-  }
-}
-EOF
+render_template cubit.dart.tpl CUBIT_DEP_IMPORT "$CUBIT_DEP_IMPORT" CUBIT_DEP_TYPE "$CUBIT_DEP_TYPE" FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/presentation/bloc/${FEATURE_SNAKE}_cubit.dart"
 
 # --- 14. Presentation Layer: Screen ------------------------------------------------------
 # A single screen widget: it has one responsibility (render the load
 # lifecycle), so there is no Screen→View forwarding pair. The route provides
 # the cubit; the screen is a pure consumer.
-cat > "$STAGE_LIB/presentation/screens/${FEATURE_SNAKE}_screen.dart" <<EOF
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-
-import '../../../../core/l10n/failure_localization.dart';
-import '../../../../core/l10n/generated/app_localizations.dart';
-import '../../../../core/models/failure.dart';
-import '../../domain/models/${FEATURE_SNAKE}.dart';
-import '../bloc/${FEATURE_SNAKE}_cubit.dart';
-import '../bloc/${FEATURE_SNAKE}_state.dart';
-
-/// Single-widget screen — it renders one load lifecycle and has no distinct
-/// sub-responsibility, so there is no separate View widget to forward to.
-class ${FEATURE_PASCAL}Screen extends StatelessWidget {
-  const ${FEATURE_PASCAL}Screen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final AppLocalizations l10n = AppLocalizations.of(context);
-
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.$L10N_TITLE_KEY)),
-      body: BlocBuilder<${FEATURE_PASCAL}Cubit, ${FEATURE_PASCAL}State>(
-        builder: (BuildContext context, ${FEATURE_PASCAL}State state) {
-          return state.when(
-            initial: () => const Center(child: CircularProgressIndicator()),
-            loading: () => const Center(child: CircularProgressIndicator()),
-            loaded: (${FEATURE_PASCAL} data) =>
-                Center(child: Text(l10n.$L10N_DATA_KEY(data.name))),
-            // Localized at build time from the failure category; diagnostics
-            // carried by the failure are never displayed.
-            error: (Failure failure) => Center(
-              child: Text(localizeFailure(AppLocalizations.of(context), failure)),
-            ),
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.read<${FEATURE_PASCAL}Cubit>().loadData(),
-        child: const Icon(Icons.refresh),
-      ),
-    );
-  }
-}
-EOF
+render_template screen.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" L10N_DATA_KEY "$L10N_DATA_KEY" L10N_TITLE_KEY "$L10N_TITLE_KEY" > "$STAGE_LIB/presentation/screens/${FEATURE_SNAKE}_screen.dart"
 
 # --- 15. Test Layer: Repository Implementation Test (failure + mapping) -------------------
-cat > "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart" <<EOF
-import 'dart:async';
-
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fpdart/fpdart.dart';
-import 'package:mocktail/mocktail.dart';
-import 'package:$PROJECT_NAME/core/models/failure.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/data/datasources/${FEATURE_SNAKE}_remote_datasource.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/data/repositories/${FEATURE_SNAKE}_repository_impl.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/models/${FEATURE_SNAKE}.dart';
-EOF
+render_template repository_test_imports.dart.tpl FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart"
 if [ "$WITH_DTO" = true ]; then
-    cat >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart" <<EOF
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/data/models/${FEATURE_SNAKE}_dto.dart';
-EOF
+    render_template repository_test_dto_import.dart.tpl FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart"
 fi
-cat >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart" <<EOF
-
-class Mock${FEATURE_PASCAL}RemoteDataSource extends Mock
-    implements I${FEATURE_PASCAL}RemoteDataSource {}
-
-/// Repository tests prove three things: the data source is called, the
-/// result is mapped to the domain type, and failures are TRANSLATED to typed
-/// [Failure] values instead of escaping as exceptions.
-void main() {
-  group('${FEATURE_PASCAL}Repository', () {
-    late ${FEATURE_PASCAL}Repository repository;
-    late Mock${FEATURE_PASCAL}RemoteDataSource mockDataSource;
-
-    setUp(() {
-      mockDataSource = Mock${FEATURE_PASCAL}RemoteDataSource();
-      repository = ${FEATURE_PASCAL}Repository(mockDataSource);
-    });
-
-    test('returns the mapped domain data on success', () async {
-EOF
+render_template repository_test_setup.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart"
 if [ "$WITH_DTO" = true ]; then
-    cat >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart" <<EOF
-      when(() => mockDataSource.getData()).thenAnswer(
-        (_) async => const ${FEATURE_PASCAL}Dto(id: '1', name: 'Test'),
-      );
-EOF
+    render_template repository_test_dto_result.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart"
 else
-    cat >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart" <<EOF
-      when(() => mockDataSource.getData()).thenAnswer(
-        (_) async => const ${FEATURE_PASCAL}(id: '1', name: 'Test'),
-      );
-EOF
+    render_template repository_test_domain_result.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart"
 fi
-cat >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart" <<EOF
-
-      final Either<Failure, ${FEATURE_PASCAL}> result = await repository.getData();
-
-      verify(() => mockDataSource.getData()).called(1);
-      result.fold(
-        (_) => fail('Expected Right(${FEATURE_PASCAL})'),
-        (${FEATURE_PASCAL} data) {
-          expect(data.id, '1');
-          expect(data.name, 'Test');
-        },
-      );
-    });
-
-    test('translates an unexpected exception into Failure.unexpected', () async {
-      when(() => mockDataSource.getData()).thenThrow(StateError('boom'));
-
-      final Either<Failure, ${FEATURE_PASCAL}> result = await repository.getData();
-
-      result.fold(
-        (Failure failure) => expect(failure, const Failure.unexpected()),
-        (_) => fail('Expected Left(Failure.unexpected)'),
-      );
-    });
-
-    test('translates a timeout into Failure.networkError', () async {
-      when(() => mockDataSource.getData())
-          .thenThrow(TimeoutException('timed out'));
-
-      final Either<Failure, ${FEATURE_PASCAL}> result = await repository.getData();
-
-      result.fold(
-        (Failure failure) => expect(failure, const Failure.networkError()),
-        (_) => fail('Expected Left(Failure.networkError)'),
-      );
-    });
-  });
-}
-EOF
+render_template repository_test_body.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" >> "$STAGE_TEST/data/repositories/${FEATURE_SNAKE}_repository_impl_test.dart"
 
 # --- 16. Test Layer: DTO Mapping Test (only with --with-dto) -------------------------------
 if [ "$WITH_DTO" = true ]; then
-    cat > "$STAGE_TEST/data/models/${FEATURE_SNAKE}_dto_test.dart" <<EOF
-import 'package:flutter_test/flutter_test.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/data/models/${FEATURE_SNAKE}_dto.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/models/${FEATURE_SNAKE}.dart';
-
-/// DTO tests pin the transport contract: JSON round-trips and the
-/// DTO→domain conversion stay correct when the schema evolves.
-void main() {
-  group('${FEATURE_PASCAL}Dto', () {
-    const Map<String, dynamic> json = <String, dynamic>{
-      'id': '1',
-      'name': 'Test',
-    };
-
-    test('deserializes from JSON', () {
-      final ${FEATURE_PASCAL}Dto dto = ${FEATURE_PASCAL}Dto.fromJson(json);
-      expect(dto.id, '1');
-      expect(dto.name, 'Test');
-    });
-
-    test('serializes to JSON (round trip)', () {
-      final ${FEATURE_PASCAL}Dto dto = ${FEATURE_PASCAL}Dto.fromJson(json);
-      expect(dto.toJson(), json);
-    });
-
-    test('toDomain maps every field', () {
-      const ${FEATURE_PASCAL}Dto dto = ${FEATURE_PASCAL}Dto(id: '1', name: 'Test');
-      final ${FEATURE_PASCAL} domain = dto.toDomain();
-      expect(domain.id, '1');
-      expect(domain.name, 'Test');
-    });
-  });
-}
-EOF
+    render_template dto_test.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/data/models/${FEATURE_SNAKE}_dto_test.dart"
 fi
 
 # --- 16b. Test Layer: Service Test (only with --with-service) ---------------------------
 if [ "$WITH_SERVICE" = true ]; then
-    cat > "$STAGE_TEST/domain/services/${FEATURE_SNAKE}_service_test.dart" <<EOF
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fpdart/fpdart.dart';
-import 'package:mocktail/mocktail.dart';
-import 'package:$PROJECT_NAME/core/models/failure.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/models/${FEATURE_SNAKE}.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/repositories/${FEATURE_SNAKE}_repository.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/services/${FEATURE_SNAKE}_service.dart';
-
-class Mock${FEATURE_PASCAL}Repository extends Mock
-    implements I${FEATURE_PASCAL}Repository {}
-
-/// PLACEHOLDER service tests: they only pin the current forwarding behavior.
-/// When the service gains actual rules/coordination, replace them with tests
-/// of that logic; if the service is removed instead, delete this file with it.
-void main() {
-  group('${FEATURE_PASCAL}Service', () {
-    late ${FEATURE_PASCAL}Service service;
-    late Mock${FEATURE_PASCAL}Repository mockRepository;
-
-    setUp(() {
-      mockRepository = Mock${FEATURE_PASCAL}Repository();
-      service = ${FEATURE_PASCAL}Service(mockRepository);
-    });
-
-    test('returns the repository result on success', () async {
-      when(() => mockRepository.getData()).thenAnswer(
-        (_) async => const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '1', name: 'Test')),
-      );
-
-      final Either<Failure, ${FEATURE_PASCAL}> result = await service.getData();
-
-      verify(() => mockRepository.getData()).called(1);
-      result.fold(
-        (_) => fail('Expected Right(${FEATURE_PASCAL})'),
-        (${FEATURE_PASCAL} data) => expect(data.id, '1'),
-      );
-    });
-
-    test('forwards failures untouched', () async {
-      when(() => mockRepository.getData()).thenAnswer(
-        (_) async => const Left<Failure, ${FEATURE_PASCAL}>(Failure.networkError()),
-      );
-
-      final Either<Failure, ${FEATURE_PASCAL}> result = await service.getData();
-
-      result.fold(
-        (Failure failure) => expect(failure, const Failure.networkError()),
-        (_) => fail('Expected Left(Failure.networkError)'),
-      );
-    });
-  });
-}
-EOF
+    render_template service_test.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/domain/services/${FEATURE_SNAKE}_service_test.dart"
 fi
 
 # --- 17. Test Layer: Cubit Test -------------------------------------------------------------
@@ -744,346 +365,10 @@ if [ "$WITH_SERVICE" = true ]; then
     CUBIT_TEST_MOCK_TYPE="${FEATURE_PASCAL}Service"
     CUBIT_TEST_MOCK_IMPORT="package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/services/${FEATURE_SNAKE}_service.dart"
 fi
-cat > "$STAGE_TEST/presentation/bloc/${FEATURE_SNAKE}_cubit_test.dart" <<EOF
-import 'dart:async';
-
-import 'package:bloc_test/bloc_test.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:fpdart/fpdart.dart';
-import 'package:mocktail/mocktail.dart';
-import 'package:$PROJECT_NAME/core/models/failure.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/models/${FEATURE_SNAKE}.dart';
-import '$CUBIT_TEST_MOCK_IMPORT';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/presentation/bloc/${FEATURE_SNAKE}_cubit.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/presentation/bloc/${FEATURE_SNAKE}_state.dart';
-
-class Mock${CUBIT_TEST_MOCK_TYPE} extends Mock implements ${CUBIT_TEST_MOCK_TYPE} {}
-
-/// Tests for the ${FEATURE_PASCAL}Cubit, including the deliberate async
-/// lifecycle semantics: latest-request-wins reads, no emission after close,
-/// and stale failures that cannot overwrite newer successes.
-void main() {
-  group('${FEATURE_PASCAL}Cubit', () {
-    late ${FEATURE_PASCAL}Cubit cubit;
-    late Mock${CUBIT_TEST_MOCK_TYPE} mockSource;
-
-    setUp(() {
-      mockSource = Mock${CUBIT_TEST_MOCK_TYPE}();
-      cubit = ${FEATURE_PASCAL}Cubit(mockSource);
-    });
-
-    tearDown(() {
-      cubit.close();
-    });
-
-    test('initial state is initial', () {
-      expect(cubit.state, const ${FEATURE_PASCAL}State.initial());
-    });
-
-    blocTest<${FEATURE_PASCAL}Cubit, ${FEATURE_PASCAL}State>(
-      'emits [loading, loaded] when loadData is successful',
-      build: () {
-        when(() => mockSource.getData()).thenAnswer(
-          (_) async => const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '1', name: 'Test')),
-        );
-        return cubit;
-      },
-      act: (${FEATURE_PASCAL}Cubit cubit) => cubit.loadData(),
-      expect: () => <${FEATURE_PASCAL}State>[
-        const ${FEATURE_PASCAL}State.loading(),
-        const ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL}(id: '1', name: 'Test')),
-      ],
-    );
-
-    blocTest<${FEATURE_PASCAL}Cubit, ${FEATURE_PASCAL}State>(
-      'emits [loading, error] when loadData fails',
-      build: () {
-        when(() => mockSource.getData()).thenAnswer(
-          (_) async => const Left<Failure, ${FEATURE_PASCAL}>(Failure.networkError()),
-        );
-        return cubit;
-      },
-      act: (${FEATURE_PASCAL}Cubit cubit) => cubit.loadData(),
-      expect: () => <${FEATURE_PASCAL}State>[
-        const ${FEATURE_PASCAL}State.loading(),
-        const ${FEATURE_PASCAL}State.error(failure: Failure.networkError()),
-      ],
-    );
-
-    test('a success completing after close does not emit or throw', () async {
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> completer =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      when(() => mockSource.getData()).thenAnswer((_) => completer.future);
-
-      final List<${FEATURE_PASCAL}State> emissions = <${FEATURE_PASCAL}State>[];
-      final StreamSubscription<${FEATURE_PASCAL}State> subscription =
-          cubit.stream.listen(emissions.add);
-
-      final Future<void> load = cubit.loadData();
-      await cubit.close();
-      completer.complete(
-        const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '1', name: 'Late')),
-      );
-
-      // Does not throw (emit on a closed cubit would).
-      await load;
-      // Flush the microtask queue so the broadcast state stream delivers
-      // queued emissions before the subscription is cancelled.
-      await Future<void>.delayed(Duration.zero);
-      await subscription.cancel();
-      expect(emissions, <${FEATURE_PASCAL}State>[const ${FEATURE_PASCAL}State.loading()]);
-    });
-
-    test('a failure completing after close does not emit or throw', () async {
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> completer =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      when(() => mockSource.getData()).thenAnswer((_) => completer.future);
-
-      final List<${FEATURE_PASCAL}State> emissions = <${FEATURE_PASCAL}State>[];
-      final StreamSubscription<${FEATURE_PASCAL}State> subscription =
-          cubit.stream.listen(emissions.add);
-
-      final Future<void> load = cubit.loadData();
-      await cubit.close();
-      completer.complete(
-        const Left<Failure, ${FEATURE_PASCAL}>(Failure.unauthorized()),
-      );
-
-      await load;
-      // Flush the microtask queue so the broadcast state stream delivers
-      // queued emissions before the subscription is cancelled.
-      await Future<void>.delayed(Duration.zero);
-      await subscription.cancel();
-      expect(emissions, <${FEATURE_PASCAL}State>[const ${FEATURE_PASCAL}State.loading()]);
-    });
-
-    test('two reads completed in reverse order retain the newer result', () async {
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> first =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> second =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      int call = 0;
-      when(() => mockSource.getData()).thenAnswer((_) {
-        call++;
-        return call == 1 ? first.future : second.future;
-      });
-
-      final List<${FEATURE_PASCAL}State> emissions = <${FEATURE_PASCAL}State>[];
-      final StreamSubscription<${FEATURE_PASCAL}State> subscription =
-          cubit.stream.listen(emissions.add);
-
-      final Future<void> firstLoad = cubit.loadData();
-      final Future<void> secondLoad = cubit.loadData();
-
-      // The newer request completes first; then the stale older one resolves.
-      second.complete(
-        const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '2', name: 'Newer')),
-      );
-      await secondLoad;
-      first.complete(
-        const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '1', name: 'Older')),
-      );
-      await firstLoad;
-
-      // Flush the microtask queue so the broadcast state stream delivers
-      // queued emissions before the subscription is cancelled.
-      await Future<void>.delayed(Duration.zero);
-      await subscription.cancel();
-      expect(emissions.last, const ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL}(id: '2', name: 'Newer')));
-    });
-
-    test('a stale failure cannot overwrite a newer success', () async {
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> first =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> second =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      int call = 0;
-      when(() => mockSource.getData()).thenAnswer((_) {
-        call++;
-        return call == 1 ? first.future : second.future;
-      });
-
-      final List<${FEATURE_PASCAL}State> emissions = <${FEATURE_PASCAL}State>[];
-      final StreamSubscription<${FEATURE_PASCAL}State> subscription =
-          cubit.stream.listen(emissions.add);
-
-      final Future<void> firstLoad = cubit.loadData();
-      final Future<void> secondLoad = cubit.loadData();
-
-      second.complete(
-        const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '2', name: 'Newer')),
-      );
-      await secondLoad;
-      first.complete(
-        const Left<Failure, ${FEATURE_PASCAL}>(Failure.networkError()),
-      );
-      await firstLoad;
-
-      // Flush the microtask queue so the broadcast state stream delivers
-      // queued emissions before the subscription is cancelled.
-      await Future<void>.delayed(Duration.zero);
-      await subscription.cancel();
-      expect(
-        emissions.last,
-        isNot(const ${FEATURE_PASCAL}State.error(failure: Failure.networkError())),
-      );
-      expect(emissions.last, const ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL}(id: '2', name: 'Newer')));
-    });
-
-    test('a failed current request is followed by a successful retry', () async {
-      final Completer<Either<Failure, ${FEATURE_PASCAL}>> first =
-          Completer<Either<Failure, ${FEATURE_PASCAL}>>();
-      when(() => mockSource.getData()).thenAnswer((_) => first.future);
-
-      final List<${FEATURE_PASCAL}State> emissions = <${FEATURE_PASCAL}State>[];
-      final StreamSubscription<${FEATURE_PASCAL}State> subscription =
-          cubit.stream.listen(emissions.add);
-
-      final Future<void> failedLoad = cubit.loadData();
-      first.complete(
-        const Left<Failure, ${FEATURE_PASCAL}>(Failure.networkError()),
-      );
-      await failedLoad;
-
-      when(() => mockSource.getData()).thenAnswer(
-        (_) async => const Right<Failure, ${FEATURE_PASCAL}>(${FEATURE_PASCAL}(id: '2', name: 'Retry')),
-      );
-      await cubit.loadData();
-
-      // Flush the microtask queue so the broadcast state stream delivers
-      // queued emissions before the subscription is cancelled.
-      await Future<void>.delayed(Duration.zero);
-      await subscription.cancel();
-      expect(emissions, <${FEATURE_PASCAL}State>[
-        const ${FEATURE_PASCAL}State.loading(),
-        const ${FEATURE_PASCAL}State.error(failure: Failure.networkError()),
-        const ${FEATURE_PASCAL}State.loading(),
-        const ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL}(id: '2', name: 'Retry')),
-      ]);
-    });
-  });
-}
-EOF
+render_template cubit_test.dart.tpl CUBIT_TEST_MOCK_IMPORT "$CUBIT_TEST_MOCK_IMPORT" CUBIT_TEST_MOCK_TYPE "$CUBIT_TEST_MOCK_TYPE" FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/presentation/bloc/${FEATURE_SNAKE}_cubit_test.dart"
 
 # --- 18. Test Layer: Screen Widget Test ---------------------------------------------------
-cat > "$STAGE_TEST/presentation/screens/${FEATURE_SNAKE}_screen_test.dart" <<EOF
-import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:$PROJECT_NAME/core/l10n/generated/app_localizations.dart';
-import 'package:$PROJECT_NAME/core/models/failure.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/models/${FEATURE_SNAKE}.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/presentation/bloc/${FEATURE_SNAKE}_cubit.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/presentation/bloc/${FEATURE_SNAKE}_state.dart';
-import 'package:$PROJECT_NAME/features/$FEATURE_SNAKE/presentation/screens/${FEATURE_SNAKE}_screen.dart';
-
-/// Fake cubit so tests can push states without driving the real repository.
-class Fake${FEATURE_PASCAL}Cubit extends Cubit<${FEATURE_PASCAL}State>
-    implements ${FEATURE_PASCAL}Cubit {
-  Fake${FEATURE_PASCAL}Cubit() : super(const ${FEATURE_PASCAL}State.initial());
-
-  int loadCalls = 0;
-
-  void pushState(${FEATURE_PASCAL}State nextState) => emit(nextState);
-
-  @override
-  Future<void> loadData() async {
-    loadCalls++;
-  }
-}
-
-/// Widget tests for the generated screen: each state branch renders, the
-/// failure category is localized (never a raw exception string), and the
-/// refresh action reaches the cubit.
-void main() {
-  Widget buildTestableWidget(
-    Widget child, {
-    Locale locale = const Locale('en'),
-  }) {
-    return MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      locale: locale,
-      home: child,
-    );
-  }
-
-  testWidgets('shows a spinner in the initial and loading states', (
-    WidgetTester tester,
-  ) async {
-    final Fake${FEATURE_PASCAL}Cubit cubit = Fake${FEATURE_PASCAL}Cubit();
-    addTearDown(cubit.close);
-
-    await tester.pumpWidget(
-      buildTestableWidget(
-        BlocProvider<${FEATURE_PASCAL}Cubit>.value(
-          value: cubit,
-          child: const ${FEATURE_PASCAL}Screen(),
-        ),
-      ),
-    );
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-
-    cubit.pushState(const ${FEATURE_PASCAL}State.loading());
-    await tester.pump();
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-  });
-
-  testWidgets('renders the loaded data', (WidgetTester tester) async {
-    final Fake${FEATURE_PASCAL}Cubit cubit = Fake${FEATURE_PASCAL}Cubit();
-    addTearDown(cubit.close);
-
-    await tester.pumpWidget(
-      buildTestableWidget(
-        BlocProvider<${FEATURE_PASCAL}Cubit>.value(
-          value: cubit,
-          child: const ${FEATURE_PASCAL}Screen(),
-        ),
-      ),
-    );
-
-    cubit.pushState(
-      const ${FEATURE_PASCAL}State.loaded(${FEATURE_PASCAL}(id: '1', name: 'Test')),
-    );
-    await tester.pump();
-
-    // The data line is localized with a {name} placeholder (English below).
-    expect(find.text('Data: Test'), findsOneWidget);
-  });
-
-  testWidgets('displays the localized failure and retries on failure', (
-    WidgetTester tester,
-  ) async {
-    final Fake${FEATURE_PASCAL}Cubit cubit = Fake${FEATURE_PASCAL}Cubit();
-    addTearDown(cubit.close);
-
-    await tester.pumpWidget(
-      buildTestableWidget(
-        BlocProvider<${FEATURE_PASCAL}Cubit>.value(
-          value: cubit,
-          child: const ${FEATURE_PASCAL}Screen(),
-        ),
-      ),
-    );
-
-    cubit.pushState(
-      const ${FEATURE_PASCAL}State.error(failure: Failure.networkError()),
-    );
-    await tester.pump();
-
-    // The category is localized (English), not a raw exception string.
-    expect(
-      find.text('Network error. Please check your connection.'),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byIcon(Icons.refresh));
-    await tester.pump();
-
-    expect(cubit.loadCalls, 1);
-  });
-}
-EOF
+render_template screen_test.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/presentation/screens/${FEATURE_SNAKE}_screen_test.dart"
 
 # --- 19. Publish -----------------------------------------------------------------
 
@@ -1141,7 +426,7 @@ if command -v dart &> /dev/null; then
     echo -e "${GREEN}✓ Code generation complete. No more analyze errors!${NC}"
 
     # Format ONLY the files this script just generated. Line wrapping depends
-    # on the feature-name length, so the heredoc templates cannot be
+    # on the feature-name length, so the source templates cannot be
     # formatter-exact for every name; this step makes them compliant for any
     # name. It never touches user files (fverify's format gate stays
     # non-mutating by construction).
