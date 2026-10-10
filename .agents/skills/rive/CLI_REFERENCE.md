@@ -4,7 +4,7 @@
 > Full docs index: https://rive.app/docs/llms.txt
 > Purpose: give an AI agent (Claude Code, Cursor, ZCode, etc.) everything needed to install, drive, and **test** the Rive CLI without re-reading the docs.
 >
-> **Baseline validated live against rive 1.0.3 on 2026-09-16. CLI 1.1.1 updates verified 2026-09-24; CLI 1.2.0 re-verified live 2026-09-26 — see §16; CLI 1.3.0 checked 2026-10-02 — see §17; CLI 1.4.0 checked 2026-10-08 — see §18. §15 retains the original test record.**
+> **Baseline validated live against rive 1.0.3 on 2026-09-16. CLI 1.1.1 updates verified 2026-09-24; CLI 1.2.0 re-verified live 2026-09-26 — see §16; CLI 1.3.0 checked 2026-10-02 — see §17; CLI 1.4.0 checked 2026-10-08 — see §18; CLI 1.5.1 checked 2026-10-10 — see §19. §15 retains the original test record.**
 
 ---
 
@@ -91,7 +91,8 @@ Credentials stored at `~/.config/rive/app.rive.cli/` (macOS/Linux, honors `XDG_C
 | `rive samples` | Clone a runnable sample project |
 | `rive schema <Type>` | Type/property lookup |
 | `rive inspect [dir]` | Print resolved scene as JSON |
-| `rive push [dir]` | Build and upload to a linked Rive file |
+| `rive push [dir]` | Build and upload to a linked Rive file. 1.5.1: asks before overwriting a linked file; `--yes` skips (required in CI / any non-interactive shell — see §19) |
+| `rive library publish [dir]` | Publish the project's file as a LIBRARY others can import (artboards need `isComponent="true"`; view models, enums, scripts, shaders always publish). Creates on first run, cuts a version after; asks unless `--yes`; `--description=<text>`; pushes first, so the project must already be linked (1.5.1, §19) |
 | `rive pull [dir]` | Overwrite linked local build inputs with the remote file; no merge (`--yes` skips confirmation) |
 | `rive ls [projectId [folderId]]` | Browse account projects/folders/files with ids; `--all`, `--recent`, `--plain`, `--json`, `--workspace=<id>` (1.3.0) |
 | `rive workspace [<id>]` | Show / switch the current workspace (1.3.0) |
@@ -641,3 +642,42 @@ Screenshots from the whole test run are in `shots/` (scaffold, triangle sample a
 - Exit ladder: `--bogus`=2, `--format=json` without mode=2, two build modes=2. The two-modes message now names the full exclusive set (editor, `--verify`, `--once`, `--publish`, `--unpublish`, `--list-published`, `--test`, `--screenshot`, `--semantics`, `--data-dump`).
 - `--verify --format=json` envelope identical; `--screenshot --advance`; `--pointer=click` ordering rules; `--data-dump`.
 - Scaffold (1.4.0 template): `scene.rml` still SM-before-timelines with Any/Exit/Entry emitted and `defaultStateMachineId` set; `AGENTS.md` still the lean workflow doc (now also warns: don't preview via `rive push`; no HTML/web-runtime preview — unsigned scripts are rejected); `rive.yaml` = name + logs only; `.gitignore` excludes `build/` only (so a downloaded `.libraries/` would be committed, matching the release note).
+
+---
+
+## 19. CLI 1.5.1 changes (release 2026-10-10; ✅ = verified live 2026-10-10, 📄 = release notes / `--help` only)
+
+### Publish a library from the CLI (✅ command surface from `rive library --help`; behavior 📄)
+- `rive library publish [dir]` — publishes the project's Rive file as a library other files can import (artboards, view models, enums, scripts, shaders). First run creates the library; every later run cuts a new version.
+- Artboards publish only with `isComponent="true"`; view models, enums, scripts and shaders always do.
+- Before publishing it lists what the new version adds and removes, then asks; `--description=<text>` adds a version note; `--yes` skips the question (required in CI).
+- A version is cut from the FILE's content, so the command pushes the project first — pull first if someone else works in the file. The project must be linked, so run `rive push` once before the first publish. Needs a Voyager plan or higher (📄).
+- Library scripts now type-check against the library's own view models and enums (`Data.<Name>` worked nowhere before); on a name collision the file's own type wins; `rive pull` refreshes these types (📄).
+- A project importing a library with an unnamed artboard now opens on its own main artboard — first launch AND every `--screenshot` (📄; ≤1.5.0 opened the library's unnamed artboard).
+- Own-file scripts (`<ScriptAsset file="...">`) keep the same id from build to build, written back into markup as `codeFileId` (📄; before, every build minted a new id, so library versions replaced scripts and importers lost them).
+- Libraries written as fragments (no `<Rive>` root): a top-level import anywhere now works (📄; before, the import reached the `.riv` but its view models were undeclared and scripts left out).
+
+### `rive push` asks before overwriting (✅ `--yes` flag + help text; prompt 📄)
+- A push to an already-linked file now asks: `Pushing rive-cli project "palette" will overwrite remote file 37611. Proceed? [y/N]` — `--yes` skips.
+- Where nothing can answer (CI, a script, an agent's shell), a push WITHOUT `--yes` stops with `Rerun with --yes to confirm.` instead of pushing. Help text says it outright: `--yes … required in CI, and wherever there is no terminal to ask on`. Add `--yes` to every pipeline that pushes a linked project.
+- The FIRST push (which creates the file) doesn't ask.
+
+### Web publishing
+- `--drawer=<docked|hidden|none>` (✅ `--help`) — how a `--publish=web` page starts its control bar (fit / fullscreen / copy-link). Not sticky: pass it on every publish, like `--no-wait`; visitors can still dock, hide or remove the bar (📄).
+
+### inspect checks (✅ live for gradient; scroll 📄)
+- `gradient-too-few-stops` (error in inspect; does NOT fail the build): a linear/radial gradient with fewer than two stops. Verified live: a 1-stop `LinearGradient` passes `--verify` with 0 errors/0 warnings, and inspect reports `LinearGradient has 1 GradientStop; the editor deletes a gradient with fewer than two, leaving its paint empty` — the editor deletes it, leaving the fill/stroke colorless.
+- `shared-scroll-physics` (warning): a scroll view sharing physics with another, which the editor can reset to defaults (📄).
+
+### RML / scripting / viewer (📄)
+- Built-in editor enums (e.g. Layout Display) now BUILD in markup (≤1.5.0: pulled files failed with `enumId="48:0" matches no id in this file`); a VM property using one ships its values in the `.riv` (before: no values).
+- Scroll physics (name, friction, speed) survive the editor round trip — before, the editor swapped in defaults and a later `rive pull` brought them into your markup.
+- Shader uniform structs not a multiple of 16 bytes now draw on WebGL (before: refused; on Windows the player read past its buffer).
+- A script's async work now completes after its animation has ended (before, an `await` stalled forever once the runtime stopped updating the finished animation).
+- Viewer: rotation-constraint limits work across 180° (Min −180° holds; ranges crossing 180° work; out-of-range snaps to nearer limit); a text input inside a scroll takes a press anywhere in its field.
+
+### Windows (📄)
+- `rive . --android` previews on Android from Windows (adb discovery, emulator start, platform-tools offer; `rive doctor` reports the setup). `rive login` works on Windows 10 (SSL fix; `RIVE_NET_EXTRA_CA` / `CURL_CA_BUNDLE` honored). Arrow-key pickers and the `rive ls` browser work in Windows consoles. `.rev` export from the viewer opens a Save dialog. A second `rive --serve` on the same port now fails to start.
+
+### Unchanged on 1.5.1 (✅ live)
+- `--verify --format=json` envelope identical; `--screenshot --advance` writes; exit ladder intact (`--bogus`=2, JSON-without-mode=2, two build modes=2). Verified on a fresh 1.4.0-template scaffold.

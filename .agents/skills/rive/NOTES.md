@@ -1011,3 +1011,60 @@ Verified live end-to-end (screenshots + pointer clicks + --data-dump):
   lifts the rear off world-pinned legs → gap; animate anticipation on other
   channels instead. Draw-order swap trick: a front-layer copy of a part riding
   the same solved transform, opacity faded in while both overlap.
+
+## 2026-10-10 · Bare editor .riv → full RML rebuild (who_made_this_movie intro) · rive 1.4.0
+
+Verified live:
+- parentId index space = every artboard object from the Artboard (index 0) in
+  stream order EXCEPT `DataBindContext` (consumes no slot) — that one rule
+  explained the "+1 drift"; validated all 3974 parents resolve to containers.
+  Some Fills/Strokes are written at the END of the artboard object list (after
+  LayoutComponentStyle) — forward parent refs are normal. KeyedObject.objectId
+  uses the same index space. Animation/SM objects start at LinearAnimation.
+- Importer pattern: emit every component as RML with `id=0:(1000+index)`,
+  enum ints → schema `values` names, assetId/fontAssetId → root asset ids,
+  sourceId/styleId → component ids; drop TrimPath/TextModifier*/constraints/
+  Events/interpolators. Built green first try; art pixel-matched.
+- `rive inspect . --summary` flags `StateMachineListenerSingle.targetId` on a
+  Node ("has to be <Drawable> … simply ignored") while `--verify` is green.
+  Editor files DO target Nodes; in RML target a Shape (transparent-fill hit
+  rect works for clicks).
+- CLI never reports fired events (screenshot/data-dump). Prove a click
+  listener by a side-effect anim on the same listener, then prove the event
+  in the real runtime.
+- `--advance=760 --pointer=… --advance=7` is NOT frame-equal to
+  `--advance=767` (off by ~1 frame); baseline with the same command shape
+  clicking empty space, and compare cropped regions.
+- Size: variable fonts → `fontTools.varLib.instancer` at the used axis value
+  + `pyftsubset` (keep A–Z0–9) and PNG → WebP q90: 1.87 MB → 262 KB, glyphs
+  identical. TextStyleAxis on a static font is harmless.
+- Multi-line text split into per-line Texts: blank-paragraph trick
+  ("\nPROUDLY\n") does NOT keep layout; measure line centres instead.
+
+## 2026-10-10 · CLI 1.5.1 verification pass (rive 1.5.1)
+
+- User upgraded the brew cask (1.4.0 → 1.5.1) after release notes pasted;
+  binary confirmed `rive 1.5.1`. Skill edits now go through the flutterforge
+  symlink (canonical repo copy).
+- ✅ Unchanged on 1.5.1 (fresh template scaffold): verify JSON envelope,
+  screenshot+advance, exit ladder (bogus=2, json-no-mode=2, two-modes=2).
+- ✅ Command surface: `rive library publish` exists (help: first run creates,
+  later runs cut a version; pushes first since a version is cut from the
+  FILE; artboards need isComponent; --description/--yes/--uat/--quiet).
+  `rive push --yes` help: "skip the confirmation (required in CI, and
+  wherever there is no terminal to ask on)" — i.e. agent shells STOP without
+  --yes ("Rerun with --yes to confirm."). `--drawer=<docked|hidden|none>` on
+  --publish=web in help.
+- ✅ gradient-too-few-stops: added Shape+Fill+LinearGradient with ONE
+  GradientStop to the scaffold → `--verify` GREEN (0 errors, 0 warnings),
+  `rive inspect` reports error `gradient-too-few-stops` "LinearGradient has
+  1 GradientStop; the editor deletes a gradient with fewer than two, leaving
+  its paint empty". Verify-blind, inspect-only, editor-destructive → promoted
+  to SKILL.md rule 7. (shared-scroll-physics warning not tested.)
+- 📄 release-notes-only (CLI_REFERENCE §19): library publish behavior +
+  Voyager plan, library script type-checks (Data.<Name>), unnamed-artboard
+  import fix, codeFileId stable ids, fragment libraries, push prompt text,
+  drawer not sticky, built-in enums build, scroll physics round trip, WebGL
+  16-byte uniforms, async-after-animation-end, Windows --android/login/
+  pickers/save-dialog/serve-port, rotation constraint across 180°, text input
+  press-anywhere.

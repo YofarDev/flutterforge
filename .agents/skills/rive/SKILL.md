@@ -5,7 +5,7 @@ description: "Use when building, animating, verifying, or debugging Rive graphic
 
 # Rive CLI — Agent Playbook
 
-Verified against rive 1.4.0 (2026-10-08). See **Evolution protocol** before editing.
+Verified against rive 1.5.1 (2026-10-10). See **Evolution protocol** before editing.
 
 Project-generated `AGENTS.md` covers basics; this records costly traps from CLI 1.0.x–1.4.0.
 
@@ -59,8 +59,9 @@ bench/screenshot/semantics/data-dump) are exclusive. --pointer/--touch/--key/
 JSON requires a build mode; screenshot paths are CWD-relative.
 
 `rive pull` overwrites linked project files (no merge; `--yes` skips the
-confirm) — commit or inspect local changes first. `rive docs push` covers the
-round trip.
+confirm) — commit or inspect local changes first. (1.5.1) `rive push` to a
+linked file also asks; a non-interactive shell STOPS with "Rerun with --yes"
+— agents/CI: `push --yes` only, after user approval. First push doesn't ask.
 
 ## Authoring rules that bite silently
 
@@ -85,23 +86,23 @@ round trip.
 6. **Text chain** (each link fails silently): `Text > TextStylePaint
    (fontAssetId→root FontAsset, needs Fill child) > TextValueRun (styleId)`.
 7. **Colors**: ARGB hex, no `#`/`0x` (`FF57A5E0`). In rive.yaml, QUOTE them
-   (`"#1D1D1D"`) or YAML eats the rest as a comment.
+   (`"#1D1D1D"`) or YAML eats the rest as a comment. Gradients need ≥2 stops
+   (1.5.1): verify stays GREEN — inspect flags `gradient-too-few-stops`; the
+   editor deletes a 1-stop gradient, leaving the paint empty.
 8. **SM layer boilerplate**: ≤1.2 needed Any+Exit+Entry or the layer didn't
    import; 1.3.0+ auto-adds missing Any/Exit (Entry-only layer verified green).
    Artboard needs `defaultStateMachineId` or binds/pointer are dead while
    timelines still play (looks alive, isn't).
-9. **Keyed values are ABSOLUTE**: a timeline keying y/scale on a node FORCES that
-   value, clobbering authored offsets. Never key offset wrappers — add a
-   zero-offset inner node and key that.
+9. **Keyed values are ABSOLUTE**: a keyed y/scale FORCES the value, clobbering
+   authored offsets — never key offset wrappers; key a zero-offset inner node.
 10. Width/height live on the path (`Rectangle`/`Ellipse`), NOT on `Shape`.
 11. Enum values are validated (use symbolic names); most other silent failures
     are not. Layout alignments: topLeft…bottomRight, center*, spaceBetween*.
-12. `Component.flags` (hidden etc.) is editor-only — `hidden="true"` does NOT
-    change rendering.
-13. Misspelled VM/property names build clean (editor-only validation); use
-    camelCase, no spaces, no Luau keywords.
-14. `nameBased="true"` binds are inert in CLI-authored files (no ManifestAsset).
-15. **Re-skinning artwork without touching animation**: keyed component ids ARE
+12. Editor-only: `Component.flags` (`hidden="true"` does NOT render) and
+    VM/property-name validation (misspelled builds clean — camelCase, no
+    spaces, no Luau keywords).
+13. `nameBased="true"` binds are inert in CLI-authored files (no ManifestAsset).
+14. **Re-skinning artwork without touching animation**: keyed component ids ARE
    the contract — geometry/colors are free to change while ids survive (incl.
    keyed `Shape`s). Author static attrs to the f0 key values so rest pose
    matches. `Shape`s nest child `Shape`s: children paint in front of the
@@ -163,9 +164,8 @@ staggered; drag: `--pointer='drag@x1,y1>x2,y2:12'` (QUOTE it). Also available:
 - Lifecycle: `init(self, context)` (may run twice — guard VM/input access),
   `resize(self, size, scale)` (3rd param = DPR; size canvases by it),
   `advance(self, seconds)`, `draw(self, renderer)`.
-- Text in scripts: NONE in ≤1.2 (Font opaque — UI belonged in RML); 1.3.0+
-  shapes and draws it (`context:font`, `Text:append`, `text:draw` — covered by
-  `rive docs luau/api/text`; samples `scripted_text`, `text_*`).
+- Text in scripts: NONE in ≤1.2 (Font opaque); 1.3.0+ shapes and draws it
+  (`context:font`, `Text:append` — `rive docs luau/api/text`).
 - No io/coroutine/debug — net is `fetch(url)` (Promise<Response>), needs
   `--allow-net` (rive 1.4.0) else rejects `disabled`. `print` → stderr + `logs.file`.
 - Tests: `*_test.luau` with `return function(): Tests return setup end`;
@@ -192,10 +192,9 @@ stage (and SM graph states distinct x/y). Do not move child nodes to fix overlap
 
 ## Reverse-engineering a bare .riv
 
-Only geometry survives import. Best edit path: Editor `.rev` export →
-`rive create dir --from-rev=f.rev` (animations kept). Else parse the binary
-(docs wrong on ToC words, bool=1 byte, parentId drift — pair by STREAM ORDER;
-full wire-format notes in NOTES.md) or render via @rive-app/canvas locally.
+Only geometry survives import. Best: Editor `.rev` export → `rive create dir
+--from-rev=f.rev` (animations kept). Else parse the binary (wire notes in
+NOTES.md — ids pair by STREAM ORDER) or render via @rive-app/canvas locally.
 
 ## Flutter runtime pairing (verified vs rive CLI 1.1.0)
 
