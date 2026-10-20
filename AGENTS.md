@@ -2,7 +2,7 @@
 
 - Before choosing tooling, read the command catalogue: [README.md → CLI Tools](README.md#cli-tools) in a generated app, or [template-README.md → CLI Tools](template-README.md#cli-tools) in the FlutterForge template repository.
 - Use the repository-local commands below from the project root. Personal shell aliases (`fgen`, `fstr`, etc.) are optional and must not be assumed to exist.
-- Read the project-local [flutter-architecture skill](.agents/skills/flutter-architecture/SKILL.md) when adding a feature or refactoring. Also read [flutter-testing](.agents/skills/flutter-testing/SKILL.md) when writing tests, [flutter-audit](.agents/skills/flutter-audit/SKILL.md) for deep reviews, and [flutter-bloc-provider](.agents/skills/flutter-bloc-provider/SKILL.md) for provider errors or dialog/sheet provider boundaries.
+- Read the project-local [flutter-architecture skill](.agents/skills/flutter-architecture/SKILL.md) when adding a feature or refactoring. Also read [flutter-testing](.agents/skills/flutter-testing/SKILL.md) when writing tests, [flutter-audit](.agents/skills/flutter-audit/SKILL.md) for deep code reviews, [mobile-ux-audit](.agents/skills/mobile-ux-audit/SKILL.md) for hands-on UI/UX audits of a running app, [flutter-bloc-provider](.agents/skills/flutter-bloc-provider/SKILL.md) for provider errors or dialog/sheet provider boundaries, and [flutter-widget-refactor](.agents/skills/flutter-widget-refactor/SKILL.md) for widget/presentation-layer cleanups that must not change behavior. Read [rive](.agents/skills/rive/SKILL.md) when the task involves Rive graphics or animations.
 - `.agents/skills/` is the canonical skill source; edit it rather than optional synchronized copies.
 
 # Available tools
