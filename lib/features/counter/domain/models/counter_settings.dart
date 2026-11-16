@@ -3,12 +3,9 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 part 'counter_settings.freezed.dart';
 part 'counter_settings.g.dart';
 
-/// Example freezed domain model for the counter feature: immutable fields,
-/// `copyWith`, `when`/`map`, and JSON serialization via the generated
-/// `fromJson`. See the flutter-architecture skill for model conventions.
+/// Counter behavior settings.
 @freezed
 abstract class CounterSettings with _$CounterSettings {
-  /// Creates a new CounterSettings instance.
   const factory CounterSettings({
     /// The maximum value the counter can reach; `null` for no limit.
     int? maxValue,

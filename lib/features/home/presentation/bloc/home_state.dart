@@ -6,14 +6,8 @@ import '../../../../core/models/failure.dart';
 
 part 'home_state.freezed.dart';
 
-/// Union-state idiom for a load-lifecycle screen: exactly one variant is
-/// active at a time and the UI must handle each one exhaustively.
-/// Compare with `CounterState` (flat idiom) — see the flutter-architecture
-/// skill for when to use each.
-///
-/// The failure state carries the typed [Failure], not a message: presentation
-/// text is derived at build time from the failure category (see
-/// `core/l10n/failure_localization.dart`).
+/// Load-lifecycle union state. The failure carries the typed [Failure]; the
+/// screen derives text from it at build time.
 @freezed
 sealed class HomeState with _$HomeState {
   const factory HomeState.initial() = _Initial;

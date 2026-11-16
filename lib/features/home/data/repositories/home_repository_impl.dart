@@ -16,13 +16,10 @@ class HomeRepository implements IHomeRepository {
   Future<Either<Failure, HomeData>> getHomeData() async {
     try {
       final HomeDataDto dto = await _remoteDataSource.getHomeData();
-      // DTO conversion happens inside the guarded boundary: a malformed
-      // payload (bad date, bad JSON) is mapped to a typed failure instead of
-      // escaping as an exception.
+      // Inside the try: a malformed payload becomes a typed failure.
       final HomeData data = dto.toDomain();
       return Right<Failure, HomeData>(data);
     } catch (e, st) {
-      // Logs the error and stack trace once, at the mapping boundary.
       return Left<Failure, HomeData>(
         mapExceptionToFailure(e, stackTrace: st, tag: 'HomeRepository'),
       );

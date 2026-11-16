@@ -6,22 +6,12 @@ import 'core/l10n/generated/app_localizations.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 
-/// Root application widget.
-///
-/// Router ownership:
-/// - **Default (no [router] injected):** this widget's [State] creates exactly
-///   one router lazily and keeps it across rebuilds — rebuilding the root
-///   (locale/theme change above it, or a new `MyApp()` instance over the same
-///   element) must never lose the current route or its state. The internally
-///   owned router is disposed in [State.dispose].
-/// - **Injected ([router] supplied):** the caller keeps ownership. Tests
-///   inject an explicit router so each test gets an independent, disposable
-///   one; this widget does NOT dispose it.
+/// Root application widget. Without an injected [router] it creates one
+/// router per element, keeps it across rebuilds and disposes it; an injected
+/// router (tests) stays owned and disposed by the caller.
 class MyApp extends StatefulWidget {
   const MyApp({super.key, this.router});
 
-  /// Explicitly owned router. When `null`, an internally owned router is
-  /// created once per [MyApp] element and disposed with it.
   final GoRouter? router;
 
   @override
@@ -31,16 +21,12 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   GoRouter? _ownedRouter;
 
-  /// The injected router when present, otherwise the single internally owned
-  /// router (created at most once per element, retained across rebuilds).
   GoRouter get _effectiveRouter =>
       widget.router ?? (_ownedRouter ??= AppRouter.createRouter());
 
   @override
   void dispose() {
-    // Dispose only what this widget owns. An injected router belongs to its
-    // caller, which disposes it. GoRouter.dispose is void in this version —
-    // it must not be awaited.
+    // Only the owned router; an injected one belongs to the caller.
     _ownedRouter?.dispose();
     _ownedRouter = null;
     super.dispose();
@@ -63,9 +49,7 @@ class _MyAppState extends State<MyApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: const <Locale>[Locale('en'), Locale('fr')],
-      // No forced `locale:` — the app follows the device locale, resolved
-      // against the supportedLocales above (en, fr). Error states re-localize
-      // automatically because failure text is derived at build time.
+      // No forced `locale:`: the app follows the device locale.
     );
   }
 }

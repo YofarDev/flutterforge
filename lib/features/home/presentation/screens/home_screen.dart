@@ -9,9 +9,7 @@ import '../../../../core/router/route_constants.dart';
 import '../bloc/home_cubit.dart';
 import '../bloc/home_state.dart';
 
-/// Single screen widget: it renders one load lifecycle and has no distinct
-/// sub-responsibility that would justify a separate View widget to forward
-/// to. The route provides the cubit; this screen is a pure consumer.
+/// The route provides [HomeCubit]; this screen only consumes it.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
@@ -43,8 +41,7 @@ class HomeContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final AppLocalizations l10n = AppLocalizations.of(context);
 
-    // Explicit presentation transformation: trim the raw message from the
-    // repository; an empty result falls back to the localized default.
+    // Presentation decision: blank messages fall back to localized copy.
     final String trimmedMessage = welcomeMessage.trim();
 
     return SafeArea(
@@ -93,9 +90,6 @@ class HomeError extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           Text(
-            // Localized at build time from the failure category, so a locale
-            // change re-renders an existing error state. Diagnostic details
-            // carried by the failure are never displayed.
             localizeFailure(l10n, failure),
             style: Theme.of(context).textTheme.bodyLarge,
             textAlign: TextAlign.center,
