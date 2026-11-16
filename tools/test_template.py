@@ -1634,6 +1634,41 @@ class TestFverifyGate(unittest.TestCase):
         self.assertEqual([call[0] for call in calls], ["format", "analyze"])
 
 
+class TestFanalModules(unittest.TestCase):
+    """fanal.sh counts feature-module registrations/routes and flags modules
+    that are not wired (a commented-out call does not count)."""
+
+    def test_reports_module_wiring(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fanal_") as raw:
+            app = make_fake_app(Path(raw).resolve())
+            files = {
+                "lib/core/di/service_locator.dart": (
+                    "void setup() {\n  registerShopFeature(getIt);\n  // registerCartFeature(getIt);\n}\n"
+                ),
+                "lib/core/router/app_router.dart": "final r = [\n  ...shopRoutes(getIt),\n];\n",
+                "lib/features/shop/shop_module.dart": (
+                    "void registerShopFeature(GetIt getIt) {\n  getIt.registerFactory<A>(() => A());\n}\n"
+                    "List<RouteBase> shopRoutes(GetIt getIt) => [GoRoute(path: '/shop')];\n"
+                ),
+                "lib/features/cart/cart_module.dart": (
+                    "void registerCartFeature(GetIt getIt) {\n  getIt.registerFactory<B>(() => B());\n}\n"
+                    "List<RouteBase> cartRoutes(GetIt getIt) => [GoRoute(path: '/cart')];\n"
+                ),
+            }
+            for rel, text in files.items():
+                (app / rel).parent.mkdir(parents=True, exist_ok=True)
+                (app / rel).write_text(text)
+            result = run_command([SYSTEM_BASH, str(REPO_ROOT / "scripts" / "fanal.sh"), str(app)], cwd=app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            report = (app / "flutter_analysis.md").read_text()
+            self.assertIn("0 direct registration(s)", report)
+            self.assertIn("2 feature module(s) - 2 registration(s)", report)
+            self.assertIn("2 route(s) (router: 0, feature modules: 2)", report)
+            self.assertIn("Modules not called from `lib/core/di/service_locator.dart`: `lib/features/cart/cart_module.dart`", report)
+            self.assertIn("not spread into `lib/core/router/app_router.dart`: `lib/features/cart/cart_module.dart`", report)
+            self.assertNotIn("shop_module.dart`", report.split("Modules not called")[1].split("\n")[0])
+
+
 class TestFmap(unittest.TestCase):
     """fmap.sh: read-only, one line per feature with its wiring."""
 
