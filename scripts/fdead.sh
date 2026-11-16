@@ -145,6 +145,7 @@ for filepath in ${ALL_DART_FILES[@]+"${ALL_DART_FILES[@]}"}; do
      [[ "$filename" == *.g.dart ]] || \
      [[ "$filename" == *.freezed.dart ]] || \
      [[ "$filename" == *.gen.dart ]] || \
+     [[ "$rel" == "lib/features/${filename%.dart}/$filename" ]] || \
      is_barrel_exported "$filename"; then
 
     SKIPPED=$((SKIPPED + 1))
@@ -219,5 +220,5 @@ else
 fi
 
 echo ""
-echo -e "${DIM}  Scanned $CHECKED files  •  Skipped $SKIPPED (main/tests/generated/barrel-exported)  •  $EMPTY_COUNT empty dir(s)${RESET}"
+echo -e "${DIM}  Scanned $CHECKED files  •  Skipped $SKIPPED (main/tests/generated/barrels)  •  $EMPTY_COUNT empty dir(s)${RESET}"
 echo ""

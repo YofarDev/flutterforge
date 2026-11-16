@@ -778,6 +778,16 @@ class TestFdeadAdvisory(unittest.TestCase):
             self.assertEqual(tree_snapshot(app), before)
             self.assertTrue((app / "lib" / "empty" / ".gitkeep").exists())
 
+    def test_unimported_feature_barrel_is_not_reported(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            barrel = app / "lib" / "features" / "shop" / "shop.dart"
+            barrel.parent.mkdir(parents=True)
+            barrel.write_text("library;\n")
+            result = self._run_fdead(app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertNotIn("shop.dart", result.stdout)
+
     def test_conditional_implementation_files_survive_scan(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_fdead_") as raw:
             app = self._make_app(Path(raw).resolve())
@@ -2000,6 +2010,7 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         feature = "lib/features/my_second_feature"
         tests = "test/features/my_second_feature"
         for relative in [
+            f"{feature}/my_second_feature.dart",
             f"{feature}/domain/models/my_second_feature.dart",
             f"{feature}/domain/repositories/my_second_feature_repository.dart",
             f"{feature}/data/datasources/my_second_feature_remote_datasource.dart",

@@ -168,6 +168,7 @@ const List<String> shippedScripts = <String>[
 const List<String> shippedScriptAssets = <String>[
   'scripts/fimp.py',
   'scripts/render_feature.py',
+  'scripts/feature_templates/barrel.dart.tpl',
   'scripts/feature_templates/domain_model.dart.tpl',
   'scripts/feature_templates/repository_contract.dart.tpl',
   'scripts/feature_templates/domain_service.dart.tpl',

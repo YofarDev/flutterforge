@@ -217,7 +217,7 @@ echo -e "${BLUE}   Layout: ${GREEN}lean$( [ "$WITH_SERVICE" = true ] && printf '
 # Templates are explicit shipped assets; render data without shell evaluation.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/feature_templates"
-for template in domain_model.dart.tpl repository_contract.dart.tpl domain_service.dart.tpl remote_datasource.dart.tpl dto.dart.tpl repository_impl_imports.dart.tpl repository_impl_dto_import.dart.tpl repository_impl_body.dart.tpl state.dart.tpl cubit.dart.tpl screen.dart.tpl repository_test_imports.dart.tpl repository_test_dto_import.dart.tpl repository_test_setup.dart.tpl repository_test_dto_result.dart.tpl repository_test_domain_result.dart.tpl repository_test_body.dart.tpl dto_test.dart.tpl service_test.dart.tpl cubit_test.dart.tpl screen_test.dart.tpl; do
+for template in barrel.dart.tpl domain_model.dart.tpl repository_contract.dart.tpl domain_service.dart.tpl remote_datasource.dart.tpl dto.dart.tpl repository_impl_imports.dart.tpl repository_impl_dto_import.dart.tpl repository_impl_body.dart.tpl state.dart.tpl cubit.dart.tpl screen.dart.tpl repository_test_imports.dart.tpl repository_test_dto_import.dart.tpl repository_test_setup.dart.tpl repository_test_dto_result.dart.tpl repository_test_domain_result.dart.tpl repository_test_body.dart.tpl dto_test.dart.tpl service_test.dart.tpl cubit_test.dart.tpl screen_test.dart.tpl; do
     if [ ! -f "$TEMPLATE_DIR/$template" ]; then
         err "Required feature template missing: $template"
         exit 1
@@ -269,6 +269,13 @@ fi
 # transport schema to serialize against, so no fromJson/$...g.dart is emitted;
 # add one only when the domain model itself must cross a persistence boundary.
 render_template domain_model.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/domain/models/${FEATURE_SNAKE}.dart"
+
+# --- 6b. Public barrel: the only file other features may import -------------
+BARREL_SERVICE_EXPORT=""
+if [ "$WITH_SERVICE" = true ]; then
+    BARREL_SERVICE_EXPORT="export 'domain/services/${FEATURE_SNAKE}_service.dart';"
+fi
+render_template barrel.dart.tpl BARREL_SERVICE_EXPORT "$BARREL_SERVICE_EXPORT" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/${FEATURE_SNAKE}.dart"
 
 # --- 7. Domain Layer: Repository Interface ---
 render_template repository_contract.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/domain/repositories/${FEATURE_SNAKE}_repository.dart"
