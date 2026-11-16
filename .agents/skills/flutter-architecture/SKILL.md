@@ -348,7 +348,7 @@ group('AuthRepositoryImpl.login error mapping', () {
 
 ## Async Lifecycle in Cubits (ordering, disposal, reset, streams)
 
-Reads use **latest-request-wins**: each accepted request captures a monotonically increasing request id before awaiting; after the await, the cubit re-checks the id (and `isClosed`) before emitting success *or* failure, so a slow older response can never overwrite a newer one. Note the limits:
+Reads use **latest-request-wins** via the `LatestRequestWins` mixin (`core/bloc/latest_request_wins.dart`): `runLatest` gives each request an increasing id; after the await, the result reaches `onResult` only if the id is still the newest and the cubit is open, so a slow older response (success *or* failure) never overwrites a newer one. Use the mixin instead of hand-rolling request ids; it is tested once in core, so cubit tests cover only their own transitions. Note the limits:
 
 - **Ignoring a stale result is not cancelling the request.** The underlying network call still runs to completion; only its emission is discarded. True cancellation is a separate decision (e.g. a BLoC with `switchMap`, or a cancellable data-source API).
 - **Read ordering and write ordering are different decisions.** The counter deliberately has *no* ordered persistent-write queue: an increment that fails persistence keeps the optimistic in-memory value and falls back per its documented settings-failure policy. If your feature needs last-writer-wins on disk or serialized writes, say so explicitly in the cubit's doc comment and test it.
@@ -517,7 +517,7 @@ Signs a file does **not** need splitting:
 6. **Register dependencies in `service_locator.dart`** — keep registration and lifetimes in one place
 7. **Choose provider scope deliberately** — app-wide only for shared global state; otherwise prefer route/screen scope (the route builder provides the cubit; the screen is a pure consumer)
 8. **Add architecture tests** — repository mapping/failure tests, cubit/bloc state tests, and a DI smoke test for new registrations
-9. **Run `fverify`** (format check + `flutter analyze` + `flutter test`) before finishing — the architecture checker enforces the rules listed below
+9. **Run `./scripts/fverify.sh --fix`** (`dart fix` + `dart format`, then format check + `flutter analyze` + `flutter test`) before finishing — the architecture checker enforces the rules listed below
 
 ## Executable Rules vs Review Guidance
 

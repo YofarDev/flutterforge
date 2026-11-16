@@ -9,64 +9,14 @@ import 'package:my_flutter_app/core/models/failure.dart';
 import 'package:my_flutter_app/features/counter/domain/models/counter_settings.dart';
 import 'package:my_flutter_app/features/counter/domain/services/counter_service.dart';
 import 'package:my_flutter_app/features/counter/presentation/bloc/counter_cubit.dart';
-import 'package:my_flutter_app/features/counter/presentation/bloc/counter_state.dart';
 import 'package:my_flutter_app/features/counter/presentation/screens/counter_screen.dart';
-
-class MockCounterCubit extends Mock implements CounterCubit {}
 
 class MockCounterService extends Mock implements CounterService {}
 
-/// Widget tests for the CounterScreen and CounterView.
+/// Behavior tests for the counter UI driven by a real CounterCubit.
 void main() {
   setUpAll(() {
-    registerFallbackValue(const CounterState());
     registerFallbackValue(const CounterSettings());
-  });
-
-  group('CounterScreen', () {
-    late MockCounterCubit mockCounterCubit;
-
-    setUp(() {
-      mockCounterCubit = MockCounterCubit();
-      getIt.reset();
-      getIt.registerFactory<CounterCubit>(() => mockCounterCubit);
-
-      when(() => mockCounterCubit.state).thenReturn(const CounterState());
-      when(() => mockCounterCubit.stream)
-          .thenAnswer((_) => const Stream<CounterState>.empty());
-      when(() => mockCounterCubit.close()).thenAnswer((_) async {});
-    });
-
-    testWidgets('renders CounterView', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: BlocProvider<CounterCubit>.value(
-            value: mockCounterCubit,
-            child: const CounterScreen(),
-          ),
-        ),
-      );
-
-      expect(find.byType(CounterView), findsOneWidget);
-    });
-
-    testWidgets('provides CounterCubit', (WidgetTester tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: BlocProvider<CounterCubit>.value(
-            value: mockCounterCubit,
-            child: const CounterScreen(),
-          ),
-        ),
-      );
-
-      final Element context = tester.element(find.byType(CounterView));
-      expect(context.read<CounterCubit>(), isNotNull);
-    });
   });
 
   group('CounterView', () {

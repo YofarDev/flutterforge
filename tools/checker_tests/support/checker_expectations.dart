@@ -8,7 +8,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'architecture_checker.dart';
+import '../../support/architecture_checker.dart';
 import 'fixture_app.dart';
 
 /// Domain-service fixture importing get_it with an aliased/direct resolution.

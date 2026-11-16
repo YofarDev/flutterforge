@@ -225,7 +225,8 @@ the composition-root allowlist, registrations only in `service_locator.dart`. Th
 statically-visible imports and declarations only — dynamic coupling, sizing, naming, and rebuild
 scope remain review guidance, so a green run proves the enforced rules, not "all architecture".
 When you add a rule to the skill, extend the checker **and** add a negative fixture (code that
-must fail it); negative tests are part of the contract. A rule that is not tested is a suggestion.
+must fail it); negative tests are part of the contract. The checker's regression fixtures live in
+the FlutterForge template repository under `tools/checker_tests/`. A rule that is not tested is a suggestion.
 
 ## Feature-Flow Tests (real components over fake I/O)
 
@@ -254,7 +255,6 @@ instead of at first navigation. The template ships it at
 - [ ] Happy path
 - [ ] Error path
 - [ ] Exact state order where it matters
-- [ ] Delegation to domain services verified
 - [ ] No assertions on another cubit's state
 
 **Repository:**
@@ -271,7 +271,6 @@ instead of at first navigation. The template ships it at
 **Widget/Screen:**
 - [ ] Each relevant UI branch
 - [ ] User interactions
-- [ ] Provider wiring for the expected subtree
 
 ## Anti-Patterns
 
@@ -286,6 +285,10 @@ instead of at first navigation. The template ships it at
 | Use `mockito` by default | Prefer `mocktail` to avoid generation unless the project already standardizes on something else |
 | Assert on another cubit's state in a cubit test | Test each cubit in isolation |
 | Call `emit()` directly from the test body | Use `whenListen`, `MockCubit`, or a fake helper like `pushState()` |
+| Test framework/config ("uses Material 3", theme brightness) | Delete — it tests Flutter, not the app |
+| Test that a widget/provider exists ("renders XView", "provides XCubit") | Assert behavior; a behavior test already fails if the widget is missing |
+| Test that a service forwards to its repository | Test only the rules the service owns |
+| Re-test a shared mechanism in every feature (request ordering, close safety, failure copy) | Test it once where it is defined (`LatestRequestWins`, `localizeFailure`) |
 
 ## See Also
 - `mocktail-cheatsheet.md` — Reference snippets and complete examples

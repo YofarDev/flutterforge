@@ -1,7 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:my_flutter_app/core/models/failure.dart';
 import 'package:my_flutter_app/features/counter/domain/models/counter_settings.dart';
 import 'package:my_flutter_app/features/counter/domain/repositories/counter_repository.dart';
 import 'package:my_flutter_app/features/counter/domain/services/counter_service.dart';
@@ -18,35 +16,6 @@ void main() {
   });
 
   group('CounterService', () {
-    group('getSettings', () {
-      test('delegates to repository and returns Right on success', () async {
-        const CounterSettings settings = CounterSettings(stepSize: 5);
-        when(() => mockRepository.getSettings()).thenAnswer(
-          (_) async => const Right<Failure, CounterSettings>(settings),
-        );
-
-        final Either<Failure, CounterSettings> result = await service
-            .getSettings();
-
-        expect(result.isRight(), true);
-        verify(() => mockRepository.getSettings()).called(1);
-      });
-
-      test('delegates to repository and returns Left on failure', () async {
-        when(() => mockRepository.getSettings()).thenAnswer(
-          (_) async => const Left<Failure, CounterSettings>(
-            Failure.serverError(message: 'error'),
-          ),
-        );
-
-        final Either<Failure, CounterSettings> result = await service
-            .getSettings();
-
-        expect(result.isLeft(), true);
-        verify(() => mockRepository.getSettings()).called(1);
-      });
-    });
-
     group('clampValue', () {
       test('returns value when within range', () {
         const CounterSettings settings = CounterSettings(

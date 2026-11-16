@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'support/architecture_checker.dart';
+import '../support/architecture_checker.dart';
 import 'support/checker_expectations.dart';
 import 'support/fixture_app.dart';
 

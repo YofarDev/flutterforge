@@ -15,6 +15,11 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+# Colours only on an interactive terminal: agents, pipes and CI get plain text
+# (ANSI escapes are pure noise in a captured log). NO_COLOR is honoured too.
+if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
+  GREEN=''; BLUE=''; RED=''; YELLOW=''; NC=''
+fi
 
 # Check arguments
 if [ $# -lt 3 ]; then
@@ -85,7 +90,7 @@ fr_value = os.environ['ARB_FR_VALUE']
 en_value = os.environ['ARB_EN_VALUE']
 
 def fail(msg):
-    print(f"\n\033[0;31m[!] {msg}\033[0m", file=sys.stderr)
+    print(f"\n[!] {msg}", file=sys.stderr)
     sys.exit(1)
 
 def placeholders(s):

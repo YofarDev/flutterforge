@@ -42,10 +42,10 @@ Your new project is automatically configured with:
 - Inter font
 - Example counter feature
 
-For agent-assisted development, start with the generated `AGENTS.md` and its
-README's **CLI Tools** section. The generated README comes from
-[template-README.md](template-README.md#cli-tools); it documents the complete
-app tool catalogue, prerequisites, file effects, and verification sequence.
+For agent-assisted development, start with the generated `AGENTS.md`: its tool
+table is the complete catalogue. The generated README (from
+[template-README.md](template-README.md#cli-tools)) is the detailed reference
+for prerequisites, file effects, and failure behavior.
 Use repository-local commands rather than assuming personal shell aliases.
 
 ---
@@ -117,7 +117,7 @@ script also require `uv`.
 
 | Script                                         | Purpose                                               |
 | ---------------------------------------------- | ----------------------------------------------------- |
-| `./scripts/fverify.sh` | Check formatting, analyze, and run tests before finishing an app change. Run `dart fix --apply` and `dart format .` explicitly first; resolve dependencies and regenerate code when needed. The gate never fixes source. |
+| `./scripts/fverify.sh [--fix]` | Check formatting, analyze, and run tests before finishing an app change. Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format .`. Resolve dependencies and regenerate code when needed. |
 | `./scripts/fgen.sh "feature_name" [--with-service] [--with-dto]` | Generate new feature boilerplate (lean Clean Architecture by default; `--with-service` adds a placeholder domain service, `--with-dto` adds a transport DTO). Refuses to overwrite an existing feature. |
 | `./scripts/fanal.sh [project_path]`          | Write or overwrite `flutter_analysis.md` with heuristic audit leads for source review. Defaults to the current project. |
 | `./scripts/fstr.sh "key" "French" "English" [project_path]` | Add a new localization key to both ARB files and regenerate localization; placeholders must match. |
@@ -165,11 +165,14 @@ The template copies `.agents/` (the canonical skill source) and `AGENTS.md` into
 - **flutter-testing** - Unit/widget test patterns with mocktail.
 - **flutter-audit** - Analyzes codebase for architecture violations.
 - **flutter-bloc-provider** - Fixes provider errors, dialog/sheet patterns.
+- **flutter-widget-refactor** - Presentation-layer cleanups (widget extraction/merging, rebuild scope) with no behavior change.
+- **mobile-ux-audit** - Hands-on UI/UX audit of the running app (investigates and recommends only).
+- **flutterforge-upgrade** - Upgrades an app generated from an older template version (3-way merge that keeps the app's customizations).
 - **prepare-context** - Exports project files as `.txt` into a flat folder (`context-export/`) for external AI tools.
 
 These instructions are available immediately in generated projects instead of recreating them by hand.
 
-`AGENTS.md` directs agents to the complete app command catalogue, maps tasks to
+`AGENTS.md` carries the complete app command catalogue, maps tasks to
 project-local skills, and distinguishes app verification from this template
 repository's gate. Skills cover development practices; the README is the
 detailed script reference.
@@ -259,8 +262,7 @@ After running the script, follow the printed instructions to register your new
 classes in `lib/core/di/service_locator.dart` and add the route in
 `lib/core/router/app_router.dart`. A scaffold passing its unit tests is not a
 routed feature — it appears in the app only after the DI and route steps are
-applied, so run `dart fix --apply`, `dart format .`, and `./scripts/fverify.sh`
-after wiring. Features generated with the previous
+applied, so run `./scripts/fverify.sh --fix` after wiring. Features generated with the previous
 full layout keep working as-is; no migration is required.
 
 ---
@@ -272,9 +274,7 @@ need it:
 
 ```bash
 ./remove_counter.sh
-dart fix --apply
-dart format .
-./scripts/fverify.sh
+./scripts/fverify.sh --fix
 ```
 
 This will automatically:
@@ -290,6 +290,27 @@ references manually rather than relying on the template-specific text edits.
 
 ---
 
+## Upgrading Existing Apps
+
+Apps are copies, so template improvements do not reach them automatically.
+Ask an agent, from the app's root, to follow the
+[flutterforge-upgrade skill](.agents/skills/flutterforge-upgrade/SKILL.md)
+with this repository's path. It runs one helper:
+
+```bash
+uv run --no-project <template>/.agents/skills/flutterforge-upgrade/prepare_upgrade.py --template <template> --dry-run
+```
+
+The helper rebuilds what the generator shipped at the app's original template
+commit and at the target commit, then 3-way merges the difference into a new
+branch without committing: untouched files update, customized files become
+merge conflicts, and the Counter demo stays removed if the app removed it.
+The agent then resolves conflicts, applies the reported dependency changes,
+adopts opt-in code migrations, and runs `./scripts/fverify.sh --fix`. Each
+upgrade writes `.flutterforge.json` so the next one knows its starting point.
+
+---
+
 ## Development Commands
 
 These commands run inside a generated app, which has a `pubspec.yaml`:
@@ -300,9 +321,8 @@ flutter gen-l10n                  # Generate localization
 dart run build_runner build --delete-conflicting-outputs # Generate freezed models
 flutter analyze                   # Lint code
 flutter test                     # Run tests
-dart fix --apply                 # Apply available source fixes before the gate
-dart format .                    # Format after applying fixes
-./scripts/fverify.sh             # Format check + analyze + tests
+./scripts/fverify.sh --fix       # dart fix + dart format, then format check + analyze + tests
+./scripts/fverify.sh             # Non-mutating gate only (what CI runs)
 ```
 
 ---

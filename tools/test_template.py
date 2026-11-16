@@ -1424,6 +1424,19 @@ class TestShippedToolingAllowlist(unittest.TestCase):
             shipped = {path.name for path in (app / "scripts").iterdir()}
             self.assertEqual(shipped, self.ALLOWED_SCRIPTS)
             self.assertFalse((app / "tools").exists(), "test_template.py never ships")
+            self.assertFalse(
+                (app / "test" / "architecture_checker_test.dart").exists(),
+                "checker self-tests stay in the template (tools/checker_tests/)",
+            )
+
+    def test_generated_app_records_its_template_commit(self) -> None:
+        """The upgrade skill's merge base: .flutterforge.json names HEAD."""
+        with tempfile.TemporaryDirectory(prefix="forge_stamp_") as raw:
+            app = self._generate_fast_app(Path(raw).resolve(), name="stamp_app")
+            stamp = json.loads((app / ".flutterforge.json").read_text())
+            head = run_command(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT).stdout.strip()
+            self.assertEqual(stamp["templateCommit"], head)
+            self.assertIsInstance(stamp["templateDirty"], bool)
 
     def test_generated_scripts_are_executable(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_ship_") as raw:
@@ -1499,6 +1512,164 @@ class TestShippedToolingAllowlist(unittest.TestCase):
             self.assertFalse(
                 (app / ".github" / "workflows" / "template-verification.yml").exists()
             )
+
+
+class TestFverifyGate(unittest.TestCase):
+    """fverify.sh: non-mutating by default, opt-in --fix preparation, quiet
+    test reporter, and plain (colour-free) output when captured."""
+
+    FORMAT_CHECK = ["format", "--output=none", "--set-exit-if-changed", "."]
+
+    def _run(
+        self, args: list[str], *, flutter_fail: bool = False, dart_fail: bool = False
+    ) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
+        with tempfile.TemporaryDirectory(prefix="forge_fverify_") as raw:
+            root = Path(raw).resolve()
+            app = make_fake_app(root)
+            env, log = fake_tool_env(root, flutter_fail=flutter_fail, dart_fail=dart_fail)
+            result = subprocess.run(
+                [SYSTEM_BASH, str(REPO_ROOT / "scripts" / "fverify.sh"), *args],
+                cwd=str(app),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=COMMAND_TIMEOUT,
+            )
+            return result, read_invocations(log)
+
+    def test_default_run_is_non_mutating_and_quiet(self) -> None:
+        result, calls = self._run([])
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual(
+            calls,
+            [
+                self.FORMAT_CHECK,
+                ["analyze", "--no-pub"],
+                ["test", "--reporter", "failures-only"],
+            ],
+        )
+        self.assertNotIn("\x1b[", result.stdout + result.stderr)
+
+    def test_fix_prepares_then_runs_the_same_gate(self) -> None:
+        result, calls = self._run(["--fix"])
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual(
+            calls,
+            [
+                ["fix", "--apply"],
+                ["format", "."],
+                self.FORMAT_CHECK,
+                ["analyze", "--no-pub"],
+                ["test", "--reporter", "failures-only"],
+            ],
+        )
+
+    def test_explicit_reporter_and_extra_arguments_are_forwarded(self) -> None:
+        result, calls = self._run(["-r", "expanded", "--fix", "--coverage"])
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual(calls[-1], ["test", "-r", "expanded", "--coverage"])
+
+    def test_format_failure_still_reports_analysis_and_tests(self) -> None:
+        result, calls = self._run([], dart_fail=True)
+        self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual([call[0] for call in calls], ["format", "analyze", "test"])
+
+    def test_analysis_failure_stops_before_tests(self) -> None:
+        result, calls = self._run([], flutter_fail=True)
+        self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual([call[0] for call in calls], ["format", "analyze"])
+
+
+class TestUpgradeHelper(unittest.TestCase):
+    """prepare_upgrade.py (flutterforge-upgrade skill) against this repository's
+    own committed history: base detection, 3-way staging, and the stamp."""
+
+    HELPER = REPO_ROOT / ".agents" / "skills" / "flutterforge-upgrade" / "prepare_upgrade.py"
+    BASE_OFFSET = "HEAD~3"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        probe = run_command(["git", "rev-parse", cls.BASE_OFFSET], cwd=REPO_ROOT)
+        if probe.returncode != 0:
+            raise unittest.SkipTest("needs template git history (shallow clone?)")
+        cls.base = probe.stdout.strip()
+        cls.head = run_command(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT).stdout.strip()
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("prepare_upgrade", cls.HELPER)
+        assert spec is not None and spec.loader is not None
+        cls.helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.helper)
+
+    def _make_app(self, root: Path, rev: str) -> Path:
+        app = root / "old_app"
+        app.mkdir()
+        self.helper.build_tree(REPO_ROOT, rev, "demo_app", app, True)
+        (app / "pubspec.yaml").write_text("name: demo_app\n")
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "add", "-A"],
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "generated"],
+        ):
+            self.assertEqual(run_command(command, cwd=app).returncode, 0)
+        return app
+
+    def _upgrade(self, app: Path, *extra: str) -> subprocess.CompletedProcess:
+        return run_command(
+            ["uv", "run", "--no-project", str(self.HELPER), "--template", str(REPO_ROOT),
+             "--app", str(app), *extra],
+            cwd=app,
+            timeout=SLOW_TIMEOUT,
+        )
+
+    def _tree(self, rev: str, root: Path) -> dict[str, bytes]:
+        out = Path(tempfile.mkdtemp(prefix=f"tree_{rev[:7]}_", dir=root))
+        self.helper.build_tree(REPO_ROOT, rev, "demo_app", out, True)
+        return {
+            str(p.relative_to(out)): p.read_bytes()
+            for p in out.rglob("*")
+            if p.is_file() and p.name != "README.md"
+        }
+
+    def test_detected_base_ships_the_same_files_as_the_real_base(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            root = Path(raw).resolve()
+            app = self._make_app(root, self.base)
+            result = self._upgrade(app, "--dry-run")
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            detected = re.search(r"^base:\s+([0-9a-f]+)", result.stdout, re.M)
+            assert detected is not None, result.stdout
+            full = run_command(["git", "rev-parse", detected.group(1)], cwd=REPO_ROOT).stdout.strip()
+            # Ties are allowed, but only between commits shipping identical files.
+            self.assertEqual(self._tree(full, root), self._tree(self.base, root))
+
+    def test_upgrade_stages_without_committing_and_keeps_customizations(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            app = self._make_app(Path(raw).resolve(), self.base)
+            custom = app / "scripts" / "fverify.sh"
+            custom.write_text(custom.read_text() + "\n# app customization\n")
+            run_command(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                         "-qam", "customize"], cwd=app)
+            before = run_command(["git", "rev-parse", "HEAD"], cwd=app).stdout
+
+            result = self._upgrade(app, "--base", self.base)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(run_command(["git", "rev-parse", "HEAD"], cwd=app).stdout, before)
+            self.assertIn("# app customization", custom.read_text())
+            stamp = json.loads((app / ".flutterforge.json").read_text())
+            self.assertEqual(stamp["templateCommit"], self.head)
+            self.assertFalse((app / ".git" / "CHERRY_PICK_HEAD").exists())
+
+    def test_stamp_at_head_reports_up_to_date(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            app = self._make_app(Path(raw).resolve(), self.head)
+            (app / ".flutterforge.json").write_text(json.dumps({"templateCommit": self.head}))
+            run_command(["git", "add", "-A"], cwd=app)
+            run_command(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                         "-qm", "stamp"], cwd=app)
+            result = self._upgrade(app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Already up to date.", result.stdout)
 
 
 class TestVerifyTemplateScript(unittest.TestCase):
@@ -1709,6 +1880,23 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
                 0,
                 msg=f"command failed: {' '.join(command)}\n{fmt(result)}",
             )
+
+    def test_11_checker_selftests_pass_in_generated_app(self) -> None:
+        """The checker's regression fixtures are not shipped, but they must pass
+        against the checker a generated app actually contains."""
+        self.assertFalse((self.app / "test" / "architecture_checker_test.dart").exists())
+        self.assertTrue((self.app / "test" / "architecture_test.dart").exists())
+        destination = self.app / "test" / "checker_selftest"
+        shutil.copytree(REPO_ROOT / "tools" / "checker_tests", destination)
+        try:
+            result = run_command(
+                ["flutter", "test", "--reporter", "failures-only", "test/checker_selftest"],
+                cwd=self.app,
+                timeout=SLOW_TIMEOUT,
+            )
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+        finally:
+            shutil.rmtree(destination)
 
     def test_20_project_rerun_preserves_edits_and_exits_nonzero(self) -> None:
         self.assertEqual(self.create_result.returncode, 0, msg=fmt(self.create_result))

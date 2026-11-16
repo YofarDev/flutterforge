@@ -325,6 +325,7 @@ void main(List<String> args) async {
     await runCommand('flutter', <String>['gen-l10n']);
     writeReadme(templateRoot, packageName);
     replacePlaceholderInTemplateCopies(packageName);
+    writeTemplateStamp(templateRoot);
 
     stdout.writeln('🔧 Running build_runner for code generation...');
     await runCommand('dart', <String>[
@@ -877,6 +878,43 @@ Future<void> addPackages(String templateRoot) async {
       ]);
     }
   }
+}
+
+/// Records which template commit generated this app in `.flutterforge.json`.
+///
+/// The flutterforge-upgrade skill reads it as the merge base for the next
+/// template upgrade. `templateDirty` warns that uncommitted template changes
+/// were shipped too, so the commit alone does not reproduce them. Skipped
+/// (with a warning) when the template is not a git checkout.
+void writeTemplateStamp(String templateRoot) {
+  final ProcessResult head = Process.runSync('git', <String>[
+    '-C',
+    templateRoot,
+    'rev-parse',
+    'HEAD',
+  ]);
+  if (head.exitCode != 0) {
+    stderr.writeln(
+      '⚠️  Warning: template is not a git checkout; .flutterforge.json not written. '
+      'Future upgrades will detect the base by file matching instead.',
+    );
+    return;
+  }
+  final ProcessResult status = Process.runSync('git', <String>[
+    '-C',
+    templateRoot,
+    'status',
+    '--porcelain',
+    '--untracked-files=no',
+  ]);
+  final Map<String, Object> stamp = <String, Object>{
+    'templateCommit': (head.stdout as String).trim(),
+    'templateDirty': (status.stdout as String).trim().isNotEmpty,
+    'createdAt': DateTime.now().toIso8601String().substring(0, 10),
+  };
+  File(
+    '.flutterforge.json',
+  ).writeAsStringSync('${const JsonEncoder.withIndent('  ').convert(stamp)}\n');
 }
 
 /// Writes README.md from the template with the project name substituted.

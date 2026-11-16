@@ -4,8 +4,9 @@ A modern Flutter application built with Clean Architecture.
 
 ## Working with Agents
 
-Start with [AGENTS.md](AGENTS.md), then consult [CLI Tools](#cli-tools) before
-choosing a script. Commands below run from this app's root and work without
+Start with [AGENTS.md](AGENTS.md): its tool table is the complete catalogue.
+[CLI Tools](#cli-tools) below is the detailed reference for arguments and
+failure behavior. Commands below run from this app's root and work without
 personal shell aliases. Use the tool relevant to the task; advisory scans are
 review aids, not mandatory steps for every change.
 
@@ -13,9 +14,14 @@ Project-local skills live in `.agents/skills/`: read
 [flutter-architecture](.agents/skills/flutter-architecture/SKILL.md) for features
 and refactors, [flutter-testing](.agents/skills/flutter-testing/SKILL.md) for
 tests, [flutter-audit](.agents/skills/flutter-audit/SKILL.md) for deep reviews,
-and [flutter-bloc-provider](.agents/skills/flutter-bloc-provider/SKILL.md) for
-provider errors and dialog/sheet provider boundaries. Edit this canonical
-directory when maintaining skills; use the sync tool only if you keep copies.
+[flutter-bloc-provider](.agents/skills/flutter-bloc-provider/SKILL.md) for
+provider errors and dialog/sheet provider boundaries, and
+[flutter-widget-refactor](.agents/skills/flutter-widget-refactor/SKILL.md) for
+widget/presentation-layer cleanups that keep behavior unchanged. To pull in a
+newer FlutterForge template, follow
+[flutterforge-upgrade](.agents/skills/flutterforge-upgrade/SKILL.md). Edit this
+canonical directory when maintaining skills; use the sync tool only if you keep
+copies.
 
 ## Architecture
 
@@ -65,7 +71,7 @@ and `remove_counter.sh` also require [uv](https://docs.astral.sh/uv/).
 
 | Script | Purpose |
 |--------|---------|
-| `./scripts/fverify.sh` | **Quality Gate** (non-mutating): `dart format` check (never rewrites files — run `dart format .` yourself first), then `flutter analyze` + `flutter test` in one command. Run before finishing any change. |
+| `./scripts/fverify.sh [--fix]` | **Quality Gate**: `dart format` check, then `flutter analyze` + `flutter test` (failures-only reporter; pass `--reporter expanded` for full output). Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format .`. A format failure still runs analysis and tests so everything is reported in one pass. Run `--fix` before finishing any change. |
 | `./scripts/fgen.sh "name" [--with-service] [--with-dto]` | **Generate New Feature**: Creates Clean Architecture boilerplate (lean by default; optional layers via flags) and runs code generation. Refuses to overwrite an existing feature; snake_case or camelCase names. |
 | `./scripts/fstr.sh "key" "FR" "EN" [project_path]` | **Add Localization**: Adds a new key to both French and English `.arb` files, then regenerates localization. Requires a new lowerCamelCase key, valid ARB JSON, and matching placeholders. Defaults to the current project. |
 | `./scripts/fl10n.sh` | **Find Unlocalized Strings**: Scans `lib/` for hardcoded user-facing strings that should use `AppLocalizations`. |
@@ -103,15 +109,14 @@ flutter test
 # Run the app
 flutter run
 
-# Prepare explicitly before finishing a change
-dart fix --apply
-dart format .
-./scripts/fverify.sh
+# Prepare and verify before finishing a change (fix + format + gate)
+./scripts/fverify.sh --fix
 ```
 
 Resolve dependencies and regenerate localization/Freezed/JSON code above when
 needed before verification. The gate checks formatting, analyzes, and runs
-tests; it does not fix source or generate missing code. Any failed step exits
+tests; it never generates missing code, and it rewrites source only with
+`--fix`. Any failed step exits
 nonzero and must be resolved before finishing.
 
 `fimp` edits static URI tokens in the library header, preserving comments,
@@ -194,7 +199,7 @@ After generation, follow the steps the script prints: register the dependencies 
 update `test/core/di/service_locator_test.dart`, and replace the placeholder data
 source with real I/O. Note that a scaffold passing its unit tests is not a routed
 feature — it appears in the app only after the DI and route steps are applied, so
-run `dart fix --apply`, `dart format .`, and `./scripts/fverify.sh` after wiring.
+run `./scripts/fverify.sh --fix` after wiring.
 
 Features generated with the previous full layout keep working as-is; no
 migration is required.
@@ -216,9 +221,7 @@ if you do not need it:
 
 ```bash
 ./remove_counter.sh
-dart fix --apply
-dart format .
-./scripts/fverify.sh
+./scripts/fverify.sh --fix
 ```
 
 The removal script deletes Counter source/tests and updates DI, routes, Home

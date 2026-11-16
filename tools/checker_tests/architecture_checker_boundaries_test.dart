@@ -9,7 +9,7 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'support/architecture_checker.dart';
+import '../support/architecture_checker.dart';
 import 'support/fixture_app.dart';
 import 'support/checker_expectations.dart';
 

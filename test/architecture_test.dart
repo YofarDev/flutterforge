@@ -5,9 +5,9 @@ import 'support/architecture_checker.dart';
 /// Architecture boundary gate for the real application's `lib/` tree.
 ///
 /// The rules are enforced by the analyzer-based checker in
-/// `test/support/architecture_checker.dart` (see its documentation and the
-/// checker's own regression tests in `test/architecture_checker_test.dart`
-/// for the rule-by-rule fixtures):
+/// `test/support/architecture_checker.dart` (see its documentation; the
+/// checker's rule-by-rule regression fixtures live in the FlutterForge
+/// template repository under `tools/checker_tests/`):
 ///
 /// 1. Inward dependencies — presentation never imports data; domain never
 ///    imports data or presentation; data never imports presentation.
@@ -30,7 +30,8 @@ import 'support/architecture_checker.dart';
 /// gate: the checker never passes code it could not analyze.
 ///
 /// When you add a rule to the flutter-architecture skill, add it to the
-/// checker and give it fixtures in `architecture_checker_test.dart`.
+/// checker together with a negative test proving a violation is reported
+/// (in the template repository: `tools/checker_tests/`).
 void main() {
   test('lib/ respects the architecture boundaries', () async {
     final CheckerResult result = await ArchitectureChecker.checkDirectory();

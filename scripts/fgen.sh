@@ -47,6 +47,11 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
+# Colours only on an interactive terminal: agents, pipes and CI get plain text
+# (ANSI escapes are pure noise in a captured log). NO_COLOR is honoured too.
+if [ ! -t 1 ] || [ -n "${NO_COLOR:-}" ]; then
+  GREEN=''; BLUE=''; RED=''; NC=''
+fi
 
 err() {
     echo -e "${RED}Error: $*${NC}" >&2
@@ -447,7 +452,7 @@ echo ""
 echo -e "${BLUE}Next steps:${NC}"
 echo -e "${BLUE}⚠️  IMPORTANT: a scaffold that passes its unit tests is NOT a routed feature.${NC}"
 echo -e "It only appears in the app once the DI and route steps below are applied —"
-echo -e "run ${GREEN}fverify${NC} after wiring to smoke-test it end to end."
+echo -e "run ${GREEN}./scripts/fverify.sh --fix${NC} after wiring to smoke-test it end to end."
 echo ""
 echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}:"
 echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}RemoteDataSource>(() => ${FEATURE_PASCAL}RemoteDataSource());"
@@ -478,8 +483,8 @@ if [ "$WITH_DTO" = false ]; then
 fi
 if [ "$WITH_SERVICE" = true ]; then
     echo -e "5. ${FEATURE_PASCAL}Service must gain actual rules/coordination or be removed — a forwarding service is not mandatory architecture."
-    echo -e "6. Run ${GREEN}fverify${NC} before finishing."
+    echo -e "6. Run ${GREEN}./scripts/fverify.sh --fix${NC} before finishing."
 else
-    echo -e "5. Run ${GREEN}fverify${NC} before finishing."
+    echo -e "5. Run ${GREEN}./scripts/fverify.sh --fix${NC} before finishing."
 fi
 echo ""
