@@ -119,6 +119,7 @@ script also require `uv`.
 | ---------------------------------------------- | ----------------------------------------------------- |
 | `./scripts/fverify.sh [--fix]` | Check formatting, analyze, and run tests before finishing an app change. Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format .`. Resolve dependencies and regenerate code when needed. |
 | `./scripts/fgen.sh "feature_name" [--with-service] [--with-dto]` | Generate new feature boilerplate (lean Clean Architecture by default; `--with-service` adds a placeholder domain service, `--with-dto` adds a transport DTO). Refuses to overwrite an existing feature. |
+| `./scripts/fmap.sh` | Print a one-line-per-feature project map (routes, wiring, layers, barrel dependencies) to orient an agent cheaply. |
 | `./scripts/fanal.sh [project_path]`          | Write or overwrite `flutter_analysis.md` with heuristic audit leads for source review. Defaults to the current project. |
 | `./scripts/fstr.sh "key" "French" "English" [...more triples] [project_path]` | Add one or more localization keys to both ARB files and regenerate localization once; placeholders must match. |
 | `./scripts/fdead.sh`                         | Report potentially unreferenced files (advisory only; never deletes — findings require manual review) |

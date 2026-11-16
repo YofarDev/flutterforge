@@ -161,6 +161,7 @@ const List<String> shippedScripts = <String>[
   'scripts/fimp.sh',
   'scripts/fdead.sh',
   'scripts/fcheck.sh',
+  'scripts/fmap.sh',
   'scripts/sync_skills.sh',
 ];
 

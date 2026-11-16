@@ -1451,6 +1451,7 @@ class TestShippedToolingAllowlist(unittest.TestCase):
         "fimp.sh",
         "fdead.sh",
         "fcheck.sh",
+        "fmap.sh",
         "sync_skills.sh",
         "fimp.py",
         "render_feature.py",
@@ -1631,6 +1632,39 @@ class TestFverifyGate(unittest.TestCase):
         result, calls = self._run([], flutter_fail=True)
         self.assertNotEqual(result.returncode, 0, msg=fmt(result))
         self.assertEqual([call[0] for call in calls], ["format", "analyze"])
+
+
+class TestFmap(unittest.TestCase):
+    """fmap.sh: read-only, one line per feature with its wiring."""
+
+    def test_reports_wiring_routes_and_barrel_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fmap_") as raw:
+            app = make_fake_app(Path(raw).resolve())
+            files = {
+                "lib/core/di/service_locator.dart": "void setup() {\n  registerShopFeature(getIt);\n}\n",
+                "lib/core/router/app_router.dart": "final r = [\n  ...shopRoutes(getIt),\n];\n",
+                "lib/core/router/route_constants.dart": "  static const String shop = '/shop';\n",
+                "lib/features/shop/shop.dart": "library;\n",
+                "lib/features/shop/shop_module.dart": (
+                    "void registerShopFeature(GetIt getIt) {}\n"
+                    "List<RouteBase> shopRoutes(GetIt getIt) => [GoRoute(path: Routes.shop)];\n"
+                ),
+                "lib/features/shop/domain/uses_cart.dart": "import '../../cart/cart.dart';\n",
+                "lib/features/cart/cart.dart": "library;\n",
+            }
+            for rel, text in files.items():
+                (app / rel).parent.mkdir(parents=True, exist_ok=True)
+                (app / rel).write_text(text)
+            before = tree_snapshot(app)
+            result = run_command([SYSTEM_BASH, str(REPO_ROOT / "scripts" / "fmap.sh")], cwd=app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            shop = next(line for line in result.stdout.splitlines() if line.strip().startswith("shop "))
+            self.assertIn("/shop", shop)
+            self.assertIn("DI:yes router:yes", shop)
+            self.assertIn("uses: cart", shop)
+            cart = next(line for line in result.stdout.splitlines() if line.strip().startswith("cart "))
+            self.assertIn("no module", cart)
+            self.assertEqual(tree_snapshot(app), before)
 
 
 class TestFwire(unittest.TestCase):

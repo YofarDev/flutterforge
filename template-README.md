@@ -78,13 +78,14 @@ and `remove_counter.sh` also require [uv](https://docs.astral.sh/uv/).
 | `./scripts/fstr.sh "key" "FR" "EN" [...more triples] [project_path]` | **Add Localization**: Adds one or more keys to both French and English `.arb` files in one validated pass, then regenerates localization once. Requires a new lowerCamelCase key, valid ARB JSON, and matching placeholders. Defaults to the current project. |
 | `./scripts/fl10n.sh` | **Find Unlocalized Strings**: Scans `lib/` for hardcoded user-facing strings that should use `AppLocalizations`. |
 | `./scripts/fanal.sh [project_path]` | **Audit**: Writes or overwrites `flutter_analysis.md` in the selected project (defaults to the current directory). Heuristic findings guide source review; they do not establish architecture violations. |
+| `./scripts/fmap.sh` | **Project Map** (read-only): one line per feature with its routes, DI/router wiring, optional layers and barrel dependencies. Run it at the start of a session instead of exploring files. |
 | `./scripts/fdead.sh` | **Potentially Unreferenced Files** (advisory only): reports files whose basename appears in no import/export/part statement. Never deletes anything — the textual scan cannot prove deletion is safe (conditional directives, custom entry points, and filename collisions can affect findings), so review every finding manually. |
 | `./scripts/fimp.sh` / `./scripts/fimp.sh --apply` | **Fix Imports** (preview-first): with no flags, displays proposed repairs and writes nothing; `--apply` repairs unambiguous broken imports, then re-runs analysis and reports failure without rollback. Never repairs a `lib/` import into `test/`, and never gives a test helper a `package:` URI. |
 | `./scripts/fcheck.sh [package_name]` | **Dependency Inventory** (review aid): compares dependencies with direct imports, or lists imports of one package. Results do not establish that a dependency is removable; inspect exports, indirect usage, code generation, assets and platform channels. |
 | `./scripts/sync_skills.sh [--check] [--user]` | **Sync Skills**: Copies canonical top-level Markdown files from `.agents/skills` into matching skill directories in existing `.codex/skills/` targets. Missing target/skill directories are skipped and extras are retained. `--check` writes nothing and exits nonzero on drift. `--user` also targets existing `~/.agents/skills/` and `~/.claude/skills/` copies; use when user-level synchronization is requested. |
 | `./remove_counter.sh` | **Remove Counter Demo**: Deletes the Counter feature and rewrites its demo wiring/tests. For freshly generated apps with the untouched example; see [Removing Example Code](#removing-example-code). |
 
-The read-only scans (`fl10n`, `fdead`, `fcheck`, import preview, and skill drift
+The read-only scans (`fmap`, `fl10n`, `fdead`, `fcheck`, import preview, and skill drift
 check) require judgment before acting on their output. `fanal` writes a report;
 `fgen`, `fstr`, import apply, skill sync, and Counter removal modify files.
 
