@@ -187,7 +187,7 @@ lib/
 ├── app.dart                   # MaterialApp configuration
 ├── core/
 │   ├── di/
-│   │   └── service_locator.dart    # All DI wiring
+│   │   └── service_locator.dart    # App-wide registrations + feature module calls
 │   ├── router/
 │   │   ├── app_router.dart
 │   │   └── route_constants.dart
@@ -198,6 +198,8 @@ lib/
 │       └── logger.dart
 └── features/
     └── [feature]/
+        ├── [feature].dart         # public barrel (the only cross-feature import)
+        ├── [feature]_module.dart  # the feature's DI registrations + routes
         ├── data/
         │   ├── datasources/       # Local/remote data sources
         │   ├── models/            # DTOs (data transfer objects)
@@ -258,12 +260,13 @@ Generation contract:
   key-collision check); if that or `build_runner` fails, the published feature
   is kept and the script exits non-zero.
 
-After running the script, follow the printed instructions to register your new
-classes in `lib/core/di/service_locator.dart` and add the route in
-`lib/core/router/app_router.dart`. A scaffold passing its unit tests is not a
-routed feature — it appears in the app only after the DI and route steps are
-applied, so run `./scripts/fverify.sh --fix` after wiring. Features generated with the previous
-full layout keep working as-is; no migration is required.
+`fgen` wires the feature itself: it generates `lib/features/<name>/<name>_module.dart`
+(the feature's registrations and routes) and inserts it at the `// fgen:` markers
+in `service_locator.dart`, `app_router.dart`, `route_constants.dart` and the DI
+smoke test, plus a flow test that drives the module's route over a fake data
+source. If a marker was removed, it prints the exact manual edit and exits
+non-zero. Then replace the placeholder data source with real I/O and run
+`./scripts/fverify.sh --fix`.
 
 ---
 
@@ -280,8 +283,7 @@ need it:
 This will automatically:
 
 - Delete `lib/features/counter` and `test/features/counter`.
-- Remove DI registrations from `service_locator.dart`.
-- Remove routes from `app_router.dart`.
+- Remove the counter module call from `service_locator.dart` and its routes from `app_router.dart`.
 - Clean up navigation references in the Home screen.
 - Update integration tests in `app_test.dart`.
 

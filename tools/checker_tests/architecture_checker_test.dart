@@ -686,6 +686,67 @@ class AlphaService {
       );
     });
 
+    const String alphaModule = '''
+import 'package:get_it/get_it.dart';
+
+import 'data/datasources/alpha_remote_datasource.dart';
+import 'data/repositories/alpha_repository_impl.dart';
+import 'domain/repositories/i_alpha_repository.dart';
+import 'domain/services/alpha_service.dart';
+import 'presentation/bloc/alpha_cubit.dart';
+
+void registerAlphaFeature(GetIt getIt) {
+  getIt.registerLazySingleton<IAlphaRemoteDataSource>(
+    () => AlphaRemoteDataSource(),
+  );
+  getIt.registerLazySingleton<IAlphaRepository>(
+    () => AlphaRepository(getIt<IAlphaRemoteDataSource>()),
+  );
+  getIt.registerLazySingleton<AlphaService>(
+    () => AlphaService(getIt<IAlphaRepository>()),
+  );
+  getIt.registerFactory<AlphaCubit>(() => AlphaCubit(getIt<AlphaService>()));
+}
+''';
+
+    test('accepted: a feature module registers its own feature', () async {
+      await expectClean(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/alpha_module.dart': alphaModule,
+        }),
+        'alpha_module.dart importing get_it and registering alpha',
+      );
+    });
+
+    test('rejected: registration in a module-named file outside the feature '
+        'root', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/presentation/alpha_module.dart': alphaModule
+              .replaceAll("'data/", "'../data/")
+              .replaceAll("'domain/", "'../domain/")
+              .replaceAll("'presentation/", "'"),
+        }),
+        'registration-outside-di',
+        'registration in presentation/alpha_module.dart',
+      );
+    });
+
+    test('rejected: another feature importing a feature module', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/alpha_module.dart': alphaModule,
+          'lib/features/beta/presentation/uses_alpha.dart': '''
+import '../../alpha/alpha_module.dart';
+
+final Object alphaRegistration = registerAlphaFeature;
+''',
+        }),
+        'cross-feature-internals',
+        'beta importing alpha_module.dart',
+      );
+    });
+
     test('accepted: constructor injection in features', () async {
       await expectClean(fixtureApp, 'constructor injection');
     });

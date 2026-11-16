@@ -1412,6 +1412,7 @@ class TestShippedToolingAllowlist(unittest.TestCase):
         "sync_skills.sh",
         "fimp.py",
         "render_feature.py",
+        "fwire.py",
         "feature_templates",
     }
     FORBIDDEN = {
@@ -1588,6 +1589,79 @@ class TestFverifyGate(unittest.TestCase):
         result, calls = self._run([], flutter_fail=True)
         self.assertNotEqual(result.returncode, 0, msg=fmt(result))
         self.assertEqual([call[0] for call in calls], ["format", "analyze"])
+
+
+class TestFwire(unittest.TestCase):
+    """fwire.py: fgen's automatic wiring at the `// fgen:` markers."""
+
+    FWIRE = REPO_ROOT / "scripts" / "fwire.py"
+    ARGS = ["shop_item", "ShopItem", "shopItem", "demo_app"]
+
+    def _app(self, root: Path, with_markers: bool = True) -> Path:
+        files = {
+            "lib/core/di/service_locator.dart": (
+                "import 'package:get_it/get_it.dart';\n\nvoid setup() {\n"
+                "  // fgen:register-features\n}\n"
+            ),
+            "lib/core/router/app_router.dart": (
+                "import 'package:go_router/go_router.dart';\n\nfinal List<RouteBase> r = <RouteBase>[\n"
+                "  // fgen:routes\n];\n"
+            ),
+            "lib/core/router/route_constants.dart": (
+                "abstract final class Routes {\n  static const String home = '/';\n"
+                "  // fgen:route-constants\n}\n"
+            ),
+            "test/core/di/service_locator_test.dart": (
+                "import 'package:flutter_test/flutter_test.dart';\n\nvoid main() {\n"
+                "  test('x', () {\n    // fgen:resolve\n  });\n}\n"
+            ),
+        }
+        for rel, text in files.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text if with_markers else re.sub(r".*// fgen:.*\n", "", text))
+        return root
+
+    def _run(self, mode: str, app: Path) -> subprocess.CompletedProcess:
+        return run_command(
+            ["uv", "run", "--no-project", str(self.FWIRE), mode, str(app), *self.ARGS], cwd=app
+        )
+
+    def test_apply_inserts_at_every_marker_and_keeps_markers(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fwire_") as raw:
+            app = self._app(Path(raw).resolve())
+            result = self._run("apply", app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            locator = (app / "lib/core/di/service_locator.dart").read_text()
+            self.assertIn("import '../../features/shop_item/shop_item_module.dart';", locator)
+            self.assertIn("  registerShopItemFeature(getIt);\n  // fgen:register-features", locator)
+            router = (app / "lib/core/router/app_router.dart").read_text()
+            self.assertIn("  ...shopItemRoutes(getIt),\n  // fgen:routes", router)
+            constants = (app / "lib/core/router/route_constants.dart").read_text()
+            self.assertIn("static const String shopItem = '/shop_item';", constants)
+            di_test = (app / "test/core/di/service_locator_test.dart").read_text()
+            self.assertIn("package:demo_app/features/shop_item/domain/repositories/shop_item_repository.dart", di_test)
+            self.assertIn("isA<ShopItemRepository>()", di_test)
+            self.assertEqual(result.stdout.count("wired: "), 4)
+
+    def test_missing_markers_print_manual_edits_and_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fwire_") as raw:
+            app = self._app(Path(raw).resolve(), with_markers=False)
+            before = tree_snapshot(app)
+            result = self._run("apply", app)
+            self.assertEqual(result.returncode, 2, msg=fmt(result))
+            self.assertIn("registerShopItemFeature(getIt);", result.stderr)
+            self.assertEqual(tree_snapshot(app), before)
+
+    def test_route_constant_collision_is_refused_by_check(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fwire_") as raw:
+            app = self._app(Path(raw).resolve())
+            constants = app / "lib/core/router/route_constants.dart"
+            constants.write_text(constants.read_text().replace(
+                "  // fgen:route-constants", "  static const String shopItem = '/x';\n  // fgen:route-constants"))
+            result = self._run("check", app)
+            self.assertEqual(result.returncode, 1, msg=fmt(result))
+            self.assertIn("already exists", result.stderr)
 
 
 class TestUpgradeHelper(unittest.TestCase):
@@ -2047,7 +2121,17 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         self.assertIn("mySecondFeatureTitle", arb)
         self.assertIn("mySecondFeatureData", arb)
         # The printed wiring instructions include the unregistered-scaffold caveat.
-        self.assertIn("NOT a routed feature", result.stdout)
+        # fgen wires the module itself: DI, router, route constant, DI test.
+        self.assertIn("Wired:", result.stdout)
+        for wired, needle in (
+            ("lib/core/di/service_locator.dart", "registerMySecondFeatureFeature(getIt);"),
+            ("lib/core/router/app_router.dart", "...mySecondFeatureRoutes(getIt),"),
+            ("lib/core/router/route_constants.dart", "mySecondFeature = '/my_second_feature';"),
+            ("test/core/di/service_locator_test.dart", "isA<MySecondFeatureRepository>()"),
+        ):
+            self.assertIn(needle, (self.app / wired).read_text(), msg=wired)
+        self.assertTrue((self.app / f"{feature}/my_second_feature_module.dart").exists())
+        self.assertTrue((self.app / f"{tests}/my_second_feature_flow_test.dart").exists())
         cubit_test = (
             self.app / f"{tests}/presentation/bloc/my_second_feature_cubit_test.dart"
         ).read_text()
@@ -2175,136 +2259,12 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
 
     # -- Full-workflow step 3: apply the printed DI/route wiring, prove it -------
 
-    def _patch(
-        self, app: Path, relative: str, anchor: str, insertion: str, *, before: bool = False
-    ) -> None:
-        """Inserts `insertion` after (or before) `anchor` in a file (harness
-        fixture only — the production CLI stays free of patching logic; this
-        mirrors exactly what the fgen 'Next steps' instructions tell the
-        developer to type)."""
-        path = app / relative
-        content = path.read_text()
-        self.assertIn(anchor, content, msg=f"anchor missing in {relative}")
-        self.assertEqual(content.count(anchor), 1, msg=f"anchor not unique in {relative}")
-        replacement = insertion + anchor if before else anchor + insertion
-        path.write_text(content.replace(anchor, replacement, 1))
-
     def test_50_wired_feature_resolves_and_renders_through_real_router(self) -> None:
-        """The documented DI/route instructions produce a WORKING feature.
-
-        Applies exactly the registrations/route fgen printed for the lean
-        `my_second_feature` (fixture patch, see _patch), adds the DI smoke-test
-        expectations the instructions call for, and proves resolution +
-        rendering by navigating the real router with the real service locator.
-        """
+        """fgen's automatic wiring produces a WORKING feature: it resolves
+        through the real service locator and renders through the real router
+        (not just the feature-local flow test)."""
         app = self.app
-        # 1. service_locator.dart: imports + the three printed registrations.
-        self._patch(
-            app,
-            "lib/core/di/service_locator.dart",
-            "import '../../features/home/presentation/bloc/home_cubit.dart';\n",
-            "import '../../features/my_second_feature/data/datasources"
-            "/my_second_feature_remote_datasource.dart';\n"
-            "import '../../features/my_second_feature/data/repositories"
-            "/my_second_feature_repository_impl.dart';\n"
-            "import '../../features/my_second_feature/domain/repositories"
-            "/my_second_feature_repository.dart';\n"
-            "import '../../features/my_second_feature/presentation/bloc"
-            "/my_second_feature_cubit.dart';\n",
-        )
-        self._patch(
-            app,
-            "lib/core/di/service_locator.dart",
-            "  getIt.registerFactory<HomeCubit>(() => HomeCubit(getIt<IHomeRepository>()));\n",
-            "\n  // --- my_second_feature (wired per the fgen instructions) ---\n"
-            "  getIt.registerLazySingleton<IMySecondFeatureRemoteDataSource>(\n"
-            "    () => MySecondFeatureRemoteDataSource(),\n"
-            "  );\n"
-            "  getIt.registerLazySingleton<IMySecondFeatureRepository>(\n"
-            "    () => MySecondFeatureRepository(getIt<IMySecondFeatureRemoteDataSource>()),\n"
-            "  );\n"
-            "  getIt.registerFactory<MySecondFeatureCubit>(\n"
-            "    () => MySecondFeatureCubit(getIt<IMySecondFeatureRepository>()),\n"
-            "  );\n",
-        )
-        # 2. route_constants.dart: the printed constant.
-        self._patch(
-            app,
-            "lib/core/router/route_constants.dart",
-            "  static const String counter = '/counter';\n",
-            "  static const String mySecondFeature = '/my_second_feature';\n",
-        )
-        # 3. app_router.dart: imports + the printed GoRoute (route provides cubit).
-        self._patch(
-            app,
-            "lib/core/router/app_router.dart",
-            "import '../../features/home/presentation/screens/home_screen.dart';\n",
-            "import '../../features/my_second_feature/presentation/bloc"
-            "/my_second_feature_cubit.dart';\n"
-            "import '../../features/my_second_feature/presentation/screens"
-            "/my_second_feature_screen.dart';\n",
-        )
-        self._patch(
-            app,
-            "lib/core/router/app_router.dart",
-            "    ],\n    errorBuilder:",
-            "      GoRoute(\n"
-            "        path: Routes.mySecondFeature,\n"
-            "        name: 'MySecondFeature',\n"
-            "        builder: (BuildContext context, GoRouterState state) {\n"
-            "          return BlocProvider<MySecondFeatureCubit>(\n"
-            "            create: (_) => getIt<MySecondFeatureCubit>()..loadData(),\n"
-            "            child: const MySecondFeatureScreen(),\n"
-            "          );\n"
-            "        },\n"
-            "      ),\n",
-            before=True,
-        )
-        # 4. service_locator_test.dart: the expectations step 3 asks for.
-        self._patch(
-            app,
-            "test/core/di/service_locator_test.dart",
-            "import 'package:smoke_app/features/home/presentation/bloc/home_cubit.dart';\n",
-            "import 'package:smoke_app/features/my_second_feature/data/datasources"
-            "/my_second_feature_remote_datasource.dart';\n"
-            "import 'package:smoke_app/features/my_second_feature/data/repositories"
-            "/my_second_feature_repository_impl.dart';\n"
-            "import 'package:smoke_app/features/my_second_feature/domain/repositories"
-            "/my_second_feature_repository.dart';\n"
-            "import 'package:smoke_app/features/my_second_feature/presentation/bloc"
-            "/my_second_feature_cubit.dart';\n",
-        )
-        self._patch(
-            app,
-            "test/core/di/service_locator_test.dart",
-            "    expect(getIt<CounterService>(), isA<CounterService>());\n",
-            "\n    expect(\n"
-            "      getIt<IMySecondFeatureRemoteDataSource>(),\n"
-            "      isA<MySecondFeatureRemoteDataSource>(),\n"
-            "    );\n"
-            "    expect(\n"
-            "      getIt<IMySecondFeatureRepository>(),\n"
-            "      isA<MySecondFeatureRepository>(),\n"
-            "    );\n",
-        )
-        self._patch(
-            app,
-            "test/core/di/service_locator_test.dart",
-            "    addTearDown(homeCubitSecond.close);\n",
-            "    final MySecondFeatureCubit featureCubitFirst =\n"
-            "        getIt<MySecondFeatureCubit>();\n"
-            "    final MySecondFeatureCubit featureCubitSecond =\n"
-            "        getIt<MySecondFeatureCubit>();\n"
-            "    addTearDown(featureCubitFirst.close);\n"
-            "    addTearDown(featureCubitSecond.close);\n",
-        )
-        self._patch(
-            app,
-            "test/core/di/service_locator_test.dart",
-            "    expect(identical(homeCubitFirst, homeCubitSecond), isFalse);\n",
-            "    expect(identical(featureCubitFirst, featureCubitSecond), isFalse);\n",
-        )
-        # 5. Harness-owned navigation fixture: real DI + real router + real screen.
+        # Harness-owned navigation fixture: real DI + real router + real screen.
         (app / "test/features/my_second_feature/presentation").mkdir(
             parents=True, exist_ok=True
         )
@@ -2350,6 +2310,7 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
                 "lib/core/router/app_router.dart",
                 "test/core/di/service_locator_test.dart",
                 "test/features/my_second_feature/presentation/wiring_test.dart",
+                "test/features/my_second_feature/my_second_feature_flow_test.dart",
             ],
             cwd=app,
         )
@@ -2360,9 +2321,10 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
             timeout=SLOW_TIMEOUT,
         )
         self.assertEqual(result.returncode, 0, msg=fmt(result))
-        # The DI smoke test also proves the new registrations resolve.
+        # The DI smoke test and the generated flow test prove the rest.
         result = run_command(
-            ["flutter", "test", "test/core/di/service_locator_test.dart"],
+            ["flutter", "test", "test/core/di/service_locator_test.dart",
+             "test/features/my_second_feature/my_second_feature_flow_test.dart"],
             cwd=app,
             timeout=SLOW_TIMEOUT,
         )

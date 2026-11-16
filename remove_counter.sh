@@ -62,29 +62,25 @@ def remove_block(content, opener, marker):
         if marker in block:
             begin = content.rfind('\n', 0, start) + 1
             end = j + 1
-            if end < len(content) and content[end] == ',':
+            while end < len(content) and content[end] in ',;':
                 end += 1
             if end < len(content) and content[end] == '\n':
                 end += 1
             return content[:begin] + content[end:]
         search_from = j + 1
 
-# --- service_locator.dart: counter imports + registrations ---------------
+# --- service_locator.dart: counter module import + registration call -----
 rel = 'lib/core/di/service_locator.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
     content = re.sub(r"import .*counter[^\n]*\n", '', content, flags=re.I)
-    content = re.sub(
-        r"\n *getIt\.register\w*<?I?Counter\w*>?\(\n(?:.*\n)*? *\);",
-        '\n',
-        content,
-    )
-    # The setupServiceLocator override parameter and its fallback line go too.
+    content = remove_block(content, 'registerCounterFeature(', 'Counter')
+    # The setupServiceLocator override parameter goes too.
     content = ''.join(
         line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
     )
     write(rel, content)
-    print('   ✓ DI registrations removed')
+    print('   ✓ DI registration removed')
 
 # --- route_constants.dart: counter route constant -------------------------
 rel = 'lib/core/router/route_constants.dart'
@@ -99,7 +95,7 @@ rel = 'lib/core/router/app_router.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
     content = re.sub(r"import .*counter[^\n]*\n", '', content, flags=re.I)
-    content = remove_block(content, 'GoRoute(', 'Routes.counter')
+    content = re.sub(r" *\.\.\.counterRoutes\(\w*\),\n", '', content)
     write(rel, content)
     print('   ✓ Router updated')
 

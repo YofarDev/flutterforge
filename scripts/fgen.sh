@@ -217,13 +217,19 @@ echo -e "${BLUE}   Layout: ${GREEN}lean$( [ "$WITH_SERVICE" = true ] && printf '
 # Templates are explicit shipped assets; render data without shell evaluation.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE_DIR="$SCRIPT_DIR/feature_templates"
-for template in barrel.dart.tpl domain_model.dart.tpl repository_contract.dart.tpl domain_service.dart.tpl remote_datasource.dart.tpl dto.dart.tpl repository_impl_imports.dart.tpl repository_impl_dto_import.dart.tpl repository_impl_body.dart.tpl state.dart.tpl cubit.dart.tpl screen.dart.tpl repository_test_imports.dart.tpl repository_test_dto_import.dart.tpl repository_test_setup.dart.tpl repository_test_dto_result.dart.tpl repository_test_domain_result.dart.tpl repository_test_body.dart.tpl dto_test.dart.tpl service_test.dart.tpl cubit_test.dart.tpl screen_test.dart.tpl; do
+for template in barrel.dart.tpl module.dart.tpl flow_test.dart.tpl domain_model.dart.tpl repository_contract.dart.tpl domain_service.dart.tpl remote_datasource.dart.tpl dto.dart.tpl repository_impl_imports.dart.tpl repository_impl_dto_import.dart.tpl repository_impl_body.dart.tpl state.dart.tpl cubit.dart.tpl screen.dart.tpl repository_test_imports.dart.tpl repository_test_dto_import.dart.tpl repository_test_setup.dart.tpl repository_test_dto_result.dart.tpl repository_test_domain_result.dart.tpl repository_test_body.dart.tpl dto_test.dart.tpl service_test.dart.tpl cubit_test.dart.tpl screen_test.dart.tpl; do
     if [ ! -f "$TEMPLATE_DIR/$template" ]; then
         err "Required feature template missing: $template"
         exit 1
     fi
 done
 [ -f "$SCRIPT_DIR/render_feature.py" ] || { err "Feature renderer missing."; exit 1; }
+[ -f "$SCRIPT_DIR/fwire.py" ] || { err "Feature wiring helper missing."; exit 1; }
+# Refuse a route-constant collision before anything is written.
+if ! uv run --no-project "$SCRIPT_DIR/fwire.py" check "$APP_ROOT" "$FEATURE_SNAKE" "$FEATURE_PASCAL" "$FEATURE_CAMEL" "$PROJECT_NAME"; then
+    err "Refusing to generate: choose another feature name."
+    exit 1
+fi
 render_template() {
     local template="$1"
     shift
@@ -341,6 +347,19 @@ if [ "$WITH_SERVICE" = true ]; then
 fi
 render_template cubit.dart.tpl CUBIT_DEP_IMPORT "$CUBIT_DEP_IMPORT" CUBIT_DEP_TYPE "$CUBIT_DEP_TYPE" FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" > "$STAGE_LIB/presentation/bloc/${FEATURE_SNAKE}_cubit.dart"
 
+# --- 13b. Feature module: the feature's registrations and routes -----------------
+MODULE_SERVICE_IMPORT=""
+MODULE_SERVICE_REGISTRATION=""
+if [ "$WITH_SERVICE" = true ]; then
+    MODULE_SERVICE_IMPORT="import 'domain/services/${FEATURE_SNAKE}_service.dart';
+"
+    MODULE_SERVICE_REGISTRATION="  getIt.registerLazySingleton<${FEATURE_PASCAL}Service>(
+    () => ${FEATURE_PASCAL}Service(getIt<I${FEATURE_PASCAL}Repository>()),
+  );
+"
+fi
+render_template module.dart.tpl CUBIT_DEP_TYPE "$CUBIT_DEP_TYPE" FEATURE_CAMEL "$FEATURE_CAMEL" FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" MODULE_SERVICE_IMPORT "$MODULE_SERVICE_IMPORT" MODULE_SERVICE_REGISTRATION "$MODULE_SERVICE_REGISTRATION" > "$STAGE_LIB/${FEATURE_SNAKE}_module.dart"
+
 # --- 14. Presentation Layer: Screen ------------------------------------------------------
 # A single screen widget: it has one responsibility (render the load
 # lifecycle), so there is no Screen→View forwarding pair. The route provides
@@ -381,6 +400,15 @@ render_template cubit_test.dart.tpl CUBIT_TEST_MOCK_IMPORT "$CUBIT_TEST_MOCK_IMP
 
 # --- 18. Test Layer: Screen Widget Test ---------------------------------------------------
 render_template screen_test.dart.tpl FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/presentation/screens/${FEATURE_SNAKE}_screen_test.dart"
+
+# --- 18b. Test Layer: Flow test through the module's real wiring -------------------
+FLOW_TEST_DATA_IMPORT="package:$PROJECT_NAME/features/$FEATURE_SNAKE/domain/models/${FEATURE_SNAKE}.dart"
+FLOW_TEST_DATA="const ${FEATURE_PASCAL}(id: '1', name: 'Flow')"
+if [ "$WITH_DTO" = true ]; then
+    FLOW_TEST_DATA_IMPORT="package:$PROJECT_NAME/features/$FEATURE_SNAKE/data/models/${FEATURE_SNAKE}_dto.dart"
+    FLOW_TEST_DATA="const ${FEATURE_PASCAL}Dto(id: '1', name: 'Flow')"
+fi
+render_template flow_test.dart.tpl DATA_SOURCE_RETURN_TYPE "$DATA_SOURCE_RETURN_TYPE" FEATURE_CAMEL "$FEATURE_CAMEL" FEATURE_PASCAL "$FEATURE_PASCAL" FEATURE_SNAKE "$FEATURE_SNAKE" FLOW_TEST_DATA "$FLOW_TEST_DATA" FLOW_TEST_DATA_IMPORT "$FLOW_TEST_DATA_IMPORT" PROJECT_NAME "$PROJECT_NAME" > "$STAGE_TEST/${FEATURE_SNAKE}_flow_test.dart"
 
 # --- 19. Publish -----------------------------------------------------------------
 
@@ -453,45 +481,34 @@ else
     echo -e "${RED}⚠️  Warning: 'dart' command not found. Run build_runner manually.${NC}" >&2
 fi
 
-# --- 22. Next steps (DI + route wiring, per layout) ----------------------------------
+# --- 22. Wire the module into DI, router, route constants and the DI test -----------
+
+WIRE_OUTPUT="$(uv run --no-project "$SCRIPT_DIR/fwire.py" apply "$APP_ROOT" "$FEATURE_SNAKE" "$FEATURE_PASCAL" "$FEATURE_CAMEL" "$PROJECT_NAME")" && WIRE_STATUS=0 || WIRE_STATUS=$?
+WIRED_FILES=()
+while IFS= read -r line; do
+    case "$line" in
+        wired:\ *) WIRED_FILES+=("$APP_ROOT/${line#wired: }") ;;
+    esac
+done <<< "$WIRE_OUTPUT"
+if [ ${#WIRED_FILES[@]} -gt 0 ] && command -v dart &> /dev/null; then
+    dart format "${WIRED_FILES[@]}" > /dev/null
+fi
 
 echo ""
-echo -e "${BLUE}Next steps:${NC}"
-echo -e "${BLUE}⚠️  IMPORTANT: a scaffold that passes its unit tests is NOT a routed feature.${NC}"
-echo -e "It only appears in the app once the DI and route steps below are applied —"
-echo -e "run ${GREEN}./scripts/fverify.sh --fix${NC} after wiring to smoke-test it end to end."
-echo ""
-echo -e "1. Register dependencies in ${GREEN}lib/core/di/service_locator.dart${NC}:"
-echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}RemoteDataSource>(() => ${FEATURE_PASCAL}RemoteDataSource());"
-echo -e "   getIt.registerLazySingleton<I${FEATURE_PASCAL}Repository>(() => ${FEATURE_PASCAL}Repository(getIt<I${FEATURE_PASCAL}RemoteDataSource>()));"
-if [ "$WITH_SERVICE" = true ]; then
-    echo -e "   getIt.registerLazySingleton<${FEATURE_PASCAL}Service>(() => ${FEATURE_PASCAL}Service(getIt<I${FEATURE_PASCAL}Repository>()));"
-    echo -e "   (${FEATURE_PASCAL}Service is a PLACEHOLDER: grow it into real coordination logic or remove it)"
-    echo -e "   getIt.registerFactory<${FEATURE_PASCAL}Cubit>(() => ${FEATURE_PASCAL}Cubit(getIt<${FEATURE_PASCAL}Service>()));"
+if [ "$WIRE_STATUS" -eq 0 ]; then
+    echo -e "${GREEN}✓ Wired: registered in service_locator.dart, route /${FEATURE_SNAKE} added, DI smoke test updated.${NC}"
 else
-    echo -e "   getIt.registerFactory<${FEATURE_PASCAL}Cubit>(() => ${FEATURE_PASCAL}Cubit(getIt<I${FEATURE_PASCAL}Repository>()));"
+    err "Feature generated but NOT fully wired — see the manual edits above."
 fi
-echo -e "2. Add the route in ${GREEN}lib/core/router/app_router.dart${NC} — the route provides the cubit:"
-echo -e "   GoRoute("
-echo -e "     path: Routes.${FEATURE_CAMEL},"
-echo -e "     name: '${FEATURE_PASCAL}',"
-echo -e "     builder: (context, state) => BlocProvider<${FEATURE_PASCAL}Cubit>("
-echo -e "       create: (_) => getIt<${FEATURE_PASCAL}Cubit>()..loadData(),"
-echo -e "       child: const ${FEATURE_PASCAL}Screen(),"
-echo -e "     ),"
-echo -e "   )"
-echo -e "   ...and the constant in ${GREEN}lib/core/router/route_constants.dart${NC}:"
-echo -e "   static const String ${FEATURE_CAMEL} = '/${FEATURE_SNAKE}';"
-echo -e "3. Update ${GREEN}test/core/di/service_locator_test.dart${NC} with the new registrations."
-echo -e "4. Replace the placeholder data source in ${GREEN}lib/features/$FEATURE_SNAKE/data/datasources/${FEATURE_SNAKE}_remote_datasource.dart${NC} with real I/O."
-if [ "$WITH_DTO" = false ]; then
-    echo -e "   The lean layout has no transport schema; when a real one appears, hand-write"
-    echo -e "   the DTO + conversion (or use --with-dto on a scratch name as a reference)."
-fi
+echo "Next:"
+echo "  1. Replace the placeholder data source with real I/O:"
+echo "     lib/features/$FEATURE_SNAKE/data/datasources/${FEATURE_SNAKE}_remote_datasource.dart"
 if [ "$WITH_SERVICE" = true ]; then
-    echo -e "5. ${FEATURE_PASCAL}Service must gain actual rules/coordination or be removed — a forwarding service is not mandatory architecture."
-    echo -e "6. Run ${GREEN}./scripts/fverify.sh --fix${NC} before finishing."
+    echo "  2. Give ${FEATURE_PASCAL}Service real rules, or delete it (a forwarding service is not required)."
+    echo "  3. ./scripts/fverify.sh --fix"
 else
-    echo -e "5. Run ${GREEN}./scripts/fverify.sh --fix${NC} before finishing."
+    echo "  2. ./scripts/fverify.sh --fix"
 fi
-echo ""
+if [ "$WIRE_STATUS" -ne 0 ]; then
+    exit 1
+fi

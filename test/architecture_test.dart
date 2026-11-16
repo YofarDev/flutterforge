@@ -23,7 +23,9 @@ import 'support/architecture_checker.dart';
 ///    `lib/core/di/service_locator.dart` and
 ///    `lib/core/router/app_router.dart`; importing `service_locator.dart` is
 ///    additionally allowed from `lib/main.dart` for bootstrap setup only;
-///    registration only in `service_locator.dart`.
+///    registration only in `service_locator.dart`. Feature modules
+///    (`lib/features/<f>/<f>_module.dart`) may also import get_it and
+///    register their own feature on the `GetIt` they receive.
 /// 8. `lib/main.dart` is a bootstrap, never a second registration site.
 ///
 /// A run with checker errors (syntax problems, unresolved imports) fails the

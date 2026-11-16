@@ -1,5 +1,5 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:fpdart/fpdart.dart';
+import 'package:fpdart/fpdart.dart' show Either;
 
 import '../../../../core/bloc/latest_request_wins.dart';
 import '../../../../core/models/failure.dart';

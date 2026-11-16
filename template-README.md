@@ -41,7 +41,7 @@ lib/
 ├── app.dart               # MaterialApp.router configuration
 ├── core/
 │   ├── di/
-│   │   └── service_locator.dart   # All DI wiring
+│   │   └── service_locator.dart   # App-wide registrations + one call per feature module
 │   ├── router/
 │   │   ├── app_router.dart
 │   │   └── route_constants.dart
@@ -49,6 +49,8 @@ lib/
 │   └── utils/
 └── features/
     └── [feature_name]/
+        ├── [feature_name].dart          # public barrel (the only cross-feature import)
+        ├── [feature_name]_module.dart   # the feature's DI registrations + routes
         ├── data/
         │   ├── datasources/       # Local/remote data sources
         │   ├── models/            # DTOs (data transfer objects)
@@ -193,22 +195,23 @@ Generation contract:
   feature is kept, the incomplete state is reported, and the script exits
   non-zero.
 
-After generation, follow the steps the script prints: register the dependencies in
-`lib/core/di/service_locator.dart`, add the route in `lib/core/router/app_router.dart`
-(the route builder provides the cubit — the generated screen is a pure consumer),
-update `test/core/di/service_locator_test.dart`, and replace the placeholder data
-source with real I/O. Note that a scaffold passing its unit tests is not a routed
-feature — it appears in the app only after the DI and route steps are applied, so
-run `./scripts/fverify.sh --fix` after wiring.
+`fgen` wires the feature itself: it generates `lib/features/<name>/<name>_module.dart`
+(the feature's registrations and routes) and inserts it at the `// fgen:` markers
+in `service_locator.dart`, `app_router.dart`, `route_constants.dart` and the DI
+smoke test, plus a flow test that drives the module's route over a fake data
+source. If a marker was removed, it prints the exact manual edit and exits
+non-zero. Then replace the placeholder data source with real I/O and run
+`./scripts/fverify.sh --fix`.
 
-Features generated with the previous full layout keep working as-is; no
-migration is required.
+Features wired by hand in `service_locator.dart` / `app_router.dart` keep
+working; moving them into a module is optional.
 
 ## Guardrails
 
 - `test/architecture_test.dart` enforces the layering rules at test time (no cross-feature
   imports into internals, presentation never imports `data/`, no cubit-to-cubit fields,
-  `core/` stays infrastructure-only outside the composition roots).
+  `core/` stays infrastructure-only outside the composition roots, registrations only in
+  `service_locator.dart` and feature modules).
 - `test/core/di/service_locator_test.dart` smoke-tests every DI registration.
 - State idioms: union states for load-lifecycle screens (`features/home`), flat `copyWith`
   states for persistent interactive state (`features/counter`). See the `flutter-architecture`

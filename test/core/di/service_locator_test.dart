@@ -10,11 +10,9 @@ import 'package:my_flutter_app/features/home/data/repositories/home_repository_i
 import 'package:my_flutter_app/features/home/domain/repositories/home_repository.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
 
-/// DI smoke test — every registration must resolve. This catches wiring
-/// mistakes (missing registration, wrong lifetime, unresolvable constructor
-/// arguments) at test time instead of at first navigation.
-///
-/// Update this file whenever you add a registration.
+/// DI smoke test: every registration resolves through the real composition
+/// (feature modules included). `fgen` adds a line per generated feature at
+/// the marker; add one for every hand-written registration.
 void main() {
   tearDown(() {
     getIt.reset();
@@ -28,6 +26,7 @@ void main() {
     expect(getIt<ICounterRepository>(), isA<CounterRepository>());
     expect(getIt<IHomeRepository>(), isA<HomeRepository>());
     expect(getIt<CounterService>(), isA<CounterService>());
+    // fgen:resolve
   });
 
   test('cubits resolve as factories (fresh instances per request)', () async {

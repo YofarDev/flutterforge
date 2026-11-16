@@ -221,7 +221,7 @@ The layering rules from `flutter-architecture` as executable gates, enforced by 
 checker in `test/support/architecture_checker.dart` (driven from `test/architecture_test.dart`,
 fail-closed on resolution errors): inward dependencies, domain purity, cross-feature access via
 public barrels only, `core` ↛ features, no cubit/bloc stored as a field, `getIt` resolved only from
-the composition-root allowlist, registrations only in `service_locator.dart`. The checker sees
+the composition-root allowlist, registrations only in `service_locator.dart` and feature modules. The checker sees
 statically-visible imports and declarations only — dynamic coupling, sizing, naming, and rebuild
 scope remain review guidance, so a green run proves the enforced rules, not "all architecture".
 When you add a rule to the skill, extend the checker **and** add a negative fixture (code that
@@ -235,8 +235,11 @@ dependencies — that is correct there and "real repositories in tests are wrong
 applies **only** to them. Feature-flow tests are the opposite by design: they
 pump the real dependency chain (real DI composition, real router, real
 repositories/services/cubits) and replace only the **data-source seam** with a
-scripted fake. Use the narrow data-source override parameters of
-`setupServiceLocator()` for this; do not re-register the whole graph. Each test
+scripted fake. For one feature, pass the fake to its module on a fresh
+locator (`registerXFeature(GetIt.asNewInstance(), remoteDataSource: fake)`) and
+route with `xRoutes(getIt)` (what `fgen` generates); across features, use the
+data-source override parameters of `setupServiceLocator()`. Never re-register
+the graph by hand. Each test
 gets a fresh router (`AppRouter.createRouter()`), disposes it in teardown, and
 `await getIt.reset()`. Flow tests are in-process widget tests of navigation and
 lifetimes — the naming does not claim device-level coverage. See
@@ -244,10 +247,11 @@ lifetimes — the naming does not claim device-level coverage. See
 
 ## DI Smoke Test
 
-Every `service_locator.dart` registration must resolve, and cubit factories must return fresh
-instances. This catches missing registrations and unresolvable constructor arguments at test time
-instead of at first navigation. The template ships it at
-`test/core/di/service_locator_test.dart` — update it whenever you add a registration.
+Every registration (in `service_locator.dart` and the feature modules it calls) must resolve, and
+cubit factories must return fresh instances. This catches missing registrations and unresolvable
+constructor arguments at test time instead of at first navigation. The template ships it at
+`test/core/di/service_locator_test.dart`; `fgen` adds each generated feature at its marker — add a
+line yourself for hand-written registrations.
 
 ## Coverage Checklist
 

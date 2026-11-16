@@ -80,7 +80,7 @@ Do cubits/blocs emit typed failure states instead of swallowing errors?
 - Shared business logic forced into `core/` instead of a dedicated shared module/package or public contract?
 
 ### F. DI Integrity and Lifetimes
-- Is there a single registration source of truth (`service_locator.dart` / `injection.dart`)?
+- Is registration owned by one composition root (`service_locator.dart` / `injection.dart`), or by per-feature modules it calls — never by widgets, cubits or services?
 - Do composition roots resolve from `getIt` instead of manually assembling graphs?
 - Are route-scoped cubits created at the smallest sensible boundary?
 - Are parameterized cubits using `registerFactoryParam` or another explicit factory path?
@@ -156,7 +156,7 @@ Each phase must leave the app compiling and running. Never propose a big-bang re
 **Goal:** One registration source of truth, intentional provider scope.
 
 - [ ] Move manual dependency graph assembly into `service_locator.dart`
-- [ ] Keep `main.dart` limited to bootstrap (`await setupServiceLocator()`) + `runApp(...)`; registrations live in `service_locator.dart` only and app-wide providers are resolved from `getIt` in the composition roots
+- [ ] Keep `main.dart` limited to bootstrap (`await setupServiceLocator()`) + `runApp(...)`; registrations live in `service_locator.dart` and the per-feature modules it calls, and app-wide providers are resolved from `getIt` in the composition roots
 - [ ] Convert parameterized route cubits to `registerFactoryParam` or an explicit DI-backed factory
 - [ ] Re-scope feature cubits from app-wide to route/screen scope where appropriate
 

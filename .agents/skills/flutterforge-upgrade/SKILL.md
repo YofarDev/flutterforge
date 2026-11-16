@@ -97,6 +97,17 @@ apply what fits, smallest change first, re-running `fverify` after each:
 - **Quiet tests**: `test/flutter_test_config.dart` turns `AppLogger` off
   during tests. If the app's `test/` already had its own config, merge the
   `AppLogger.enabled = false;` line into it.
+- **Feature modules** (`lib/features/<f>/<f>_module.dart`): the merge brings
+  the `// fgen:` markers into `service_locator.dart`, `app_router.dart`,
+  `route_constants.dart` and the DI test only if the app had not customized
+  those files; otherwise add the four markers by hand so `fgen` can auto-wire
+  new features. Existing hand-wired features keep working; moving one into a
+  module (registrations + routes) is optional and best done when touching it.
+- **Public barrels**: add `lib/features/<f>/<f>.dart` exporting the domain
+  models/contracts of any feature another feature needs.
+- **fpdart imports**: generated code now uses `show Either, ...` so a feature
+  named like an fpdart type (e.g. `order`) compiles; apply the same fix if a
+  name clash appears.
 - **One-command gate**: use `./scripts/fverify.sh --fix` instead of separate
   `dart fix` / `dart format` / `fverify` calls in any app docs or CI notes.
 
