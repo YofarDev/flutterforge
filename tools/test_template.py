@@ -2237,8 +2237,9 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         # The full cubit depends on the service seam.
         cubit = (self.app / f"{feature}/presentation/bloc/my_third_feature_cubit.dart").read_text()
         self.assertIn("MyThirdFeatureService", cubit)
-        # The printed DI instructions register the service for this combination.
-        self.assertIn("registerLazySingleton<MyThirdFeatureService>", result.stdout)
+        # The generated module registers the service for this combination.
+        module = (self.app / "lib/features/my_third_feature/my_third_feature_module.dart").read_text()
+        self.assertIn("registerLazySingleton<MyThirdFeatureService>", module)
 
     def test_31b_fgen_dto_only_variant(self) -> None:
         """--with-dto alone: transport layer without the service seam."""
@@ -2272,9 +2273,10 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         ).read_text()
         self.assertIn("FourthFeatureDto", datasource)
         # The printed DI instructions match this combination (no service).
-        self.assertIn("registerFactory<FourthFeatureCubit>", result.stdout)
-        self.assertIn("getIt<IFourthFeatureRepository>()", result.stdout)
-        self.assertNotIn("FourthFeatureService>", result.stdout)
+        module = (self.app / "lib/features/fourth_feature/fourth_feature_module.dart").read_text()
+        self.assertIn("registerFactory<FourthFeatureCubit>", module)
+        self.assertIn("getIt<IFourthFeatureRepository>()", module)
+        self.assertNotIn("FourthFeatureService>", module)
 
     def test_31c_fgen_service_only_variant(self) -> None:
         """--with-service alone: coordination seam without a transport layer."""
@@ -2304,10 +2306,11 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         model = (self.app / f"{feature}/domain/models/fifth_feature.dart").read_text()
         self.assertNotIn("fromJson", model)
         # The printed DI instructions register the service and use it for the cubit.
-        self.assertIn("registerLazySingleton<FifthFeatureService>", result.stdout)
-        self.assertIn("FifthFeatureCubit(getIt<FifthFeatureService>())", result.stdout)
+        module = (self.app / "lib/features/fifth_feature/fifth_feature_module.dart").read_text()
+        self.assertIn("registerLazySingleton<FifthFeatureService>", module)
+        self.assertIn("FifthFeatureCubit(getIt<FifthFeatureService>())", module)
         self.assertNotIn(
-            "FifthFeatureCubit(getIt<IFifthFeatureRepository>())", result.stdout
+            "FifthFeatureCubit(getIt<IFifthFeatureRepository>())", module
         )
 
     def test_32_app_with_generated_features_passes_fverify(self) -> None:
