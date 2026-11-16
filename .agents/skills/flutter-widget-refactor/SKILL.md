@@ -270,5 +270,5 @@ hand off to this skill for the actual implementation.
 ---
 
 ## See Also
-- `flutter-architecture` → Anti-Patterns table (widget helper methods, BlocBuilder scope)
+- `flutter-architecture` → reference.md, Anti-Patterns table (widget helper methods, BlocBuilder scope)
 - `flutter-audit` → Step 2D (Presentation Scope) and Phase 5 (Presentation Polish)

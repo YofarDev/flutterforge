@@ -1,7 +1,7 @@
 # Flutter Architecture Examples
 
-Companion to `SKILL.md`. Only content not already covered there: routing, and
-concrete before/after corrections for the most common mistakes.
+Companion to `SKILL.md` (and `reference.md`): routing, and concrete
+before/after corrections for the most common mistakes.
 
 ## Routing with go_router
 
@@ -12,31 +12,40 @@ state creates one default instance, retains it across root rebuilds (a
 locale/theme change must never lose the current route), and disposes it when
 the widget's state ends. Injected routers stay owned by the caller.
 
+Each feature declares its routes in its module; `AppRouter` only spreads them
+(`...profileRoutes(getIt),` at the `// fgen:routes` marker). App-wide concerns
+such as redirects stay in `AppRouter`.
+
 ```dart
+// lib/features/profile/profile_module.dart
+List<RouteBase> profileRoutes(GetIt getIt) => <RouteBase>[
+  GoRoute(
+    path: '${Routes.profile}/:id',
+    builder: (BuildContext context, GoRouterState state) {
+      final String userId = state.pathParameters['id']!;
+      return BlocProvider<ProfileCubit>(
+        create: (_) => getIt<ProfileCubit>(param1: userId)..load(),
+        child: const ProfileScreen(),
+      );
+    },
+  ),
+];
+
 // lib/core/router/app_router.dart
-class AppRouter {
-  static GoRouter createRouter() => GoRouter(
-  routes: [
-    GoRoute(path: '/', builder: (_, __) => const HomeScreen()),
-    GoRoute(
-      path: '/profile/:id',
-      builder: (_, state) {
-        final userId = state.pathParameters['id']!;
-        return BlocProvider(
-          create: (_) => getIt<ProfileCubit>(param1: userId)..load(),
-          child: const ProfileScreen(),
-        );
-      },
-    ),
+static GoRouter createRouter() => GoRouter(
+  routes: <RouteBase>[
+    ...homeRoutes(getIt),
+    ...profileRoutes(getIt),
+    // fgen:routes
   ],
-  redirect: (_, state) {
+  redirect: (BuildContext context, GoRouterState state) {
     final SessionService session = getIt<SessionService>();
-    final bool isAuthed = session.currentUser != null;
-    if (!isAuthed && state.uri.path != '/login') return '/login';
+    if (session.currentUser == null && state.uri.path != Routes.login) {
+      return Routes.login;
+    }
     return null;
   },
-  );
-}
+);
 ```
 
 ## Common Anti-Pattern Corrections
@@ -182,6 +191,6 @@ class LoginScreen extends StatelessWidget {
 // WRONG - feature importing another feature's internals
 import '../../../chat/data/chat_api.dart';
 
-// CORRECT - depend on a shared contract or shared module
-import '../../../shared/messaging/domain/chat_gateway.dart';
+// CORRECT - import the other feature's public barrel (domain contracts only)
+import '../../../chat/chat.dart';
 ```
