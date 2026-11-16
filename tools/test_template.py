@@ -634,6 +634,48 @@ class TestFeatureRenderer(unittest.TestCase):
             self.assertIn("MISSING", result.stderr)
 
 
+    def _jobs(self, path: Path, *jobs: tuple[str, ...]) -> None:
+        path.write_bytes(b"".join(field.encode() + b"\0" for job in jobs for field in job))
+
+    def test_batch_writes_and_appends_in_order(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_render_") as raw:
+            root = Path(raw)
+            (root / "a.tpl").write_text("head {{X}}\n")
+            (root / "b.tpl").write_text("tail {{Y}}\n")
+            jobs = root / "render.jobs"
+            out = root / "out.dart"
+            self._jobs(
+                jobs,
+                ("w", str(out), str(root / "a.tpl"), "1", "X", "multi\nline %s"),
+                ("a", str(out), str(root / "b.tpl"), "1", "Y", "$(nope)"),
+            )
+            result = run_command([
+                "uv", "run", "--no-project", str(REPO_ROOT / "scripts/render_feature.py"),
+                "--batch", str(jobs),
+            ], cwd=root)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(out.read_text(), "head multi\nline %s\ntail $(nope)\n")
+
+    def test_batch_failure_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_render_") as raw:
+            root = Path(raw)
+            (root / "ok.tpl").write_text("{{X}}\n")
+            (root / "bad.tpl").write_text("{{MISSING}}\n")
+            jobs = root / "render.jobs"
+            self._jobs(
+                jobs,
+                ("w", str(root / "first.dart"), str(root / "ok.tpl"), "1", "X", "x"),
+                ("w", str(root / "second.dart"), str(root / "bad.tpl"), "0"),
+            )
+            result = run_command([
+                "uv", "run", "--no-project", str(REPO_ROOT / "scripts/render_feature.py"),
+                "--batch", str(jobs),
+            ], cwd=root)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("MISSING", result.stderr)
+            self.assertFalse((root / "first.dart").exists())
+
+
 class TestShellContract(unittest.TestCase):
     """The documented shell contract (docs/compatibility.md) is enforced.
 

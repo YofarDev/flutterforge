@@ -13,7 +13,7 @@ These commands are included in generated apps. Select the tool relevant to the t
 | --- | --- | --- |
 | `./scripts/fverify.sh --fix` | Before finishing any app change. | Runs `dart fix --apply` + `dart format .`, then the gate (format check, analyze, tests). Without `--fix` it is the same gate and never rewrites source (CI uses that form). Passing tests print nothing. |
 | `./scripts/fgen.sh feature_name [--with-service] [--with-dto]` | Add a new feature. | Writes a lean scaffold with its module, barrel, tests and translations, and wires the module into DI, router and the DI test at the `// fgen:` markers; refuses existing feature directories. |
-| `./scripts/fstr.sh keyName "French" "English"` | Add a localization key. | Updates both ARB files and regenerates localization; use matching placeholders and a new key. |
+| `./scripts/fstr.sh key "French" "English" [key "French" "English"]...` | Add localization keys. | Updates both ARB files once and regenerates localization once; pass several triples in one call. Placeholders must match; keys must be new. |
 | `./scripts/fl10n.sh` | Find hardcoded user-facing strings. | Read-only scan; review findings, then add keys with `./scripts/fstr.sh`. |
 | `./scripts/fimp.sh` then `./scripts/fimp.sh --apply` | Investigate and repair broken imports. | Preview writes nothing. Apply repairs static URI tokens; edits remain if analysis or unresolved repairs cause failure. Review proposals first. |
 | `./scripts/fdead.sh` | Investigate potentially unreferenced files. | Advisory, read-only scan; never deletes files and cannot prove deletion is safe. |
