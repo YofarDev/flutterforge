@@ -1775,6 +1775,135 @@ class TestFwire(unittest.TestCase):
             self.assertIn("already exists", result.stderr)
 
 
+class TestUpgradePlan(unittest.TestCase):
+    """prepare_upgrade.py on a synthetic two-commit template and an app that
+    diverged the way real apps do (removed demo feature, no feature templates,
+    customized files): every plan category, and the diverged-app gate."""
+
+    HELPER = REPO_ROOT / ".agents" / "skills" / "flutterforge-upgrade" / "prepare_upgrade.py"
+    BASE_FILES = {
+        "AGENTS.md": "line one\nline two\nline three\n",
+        "lib/core/a.dart": "// a v1\n",
+        "lib/core/gone.dart": "// gone\n",
+        "lib/features/home/home.dart": "// home v1\n",
+        "scripts/tool.sh": "echo v1\n",
+        "scripts/feature_templates/x.tpl": "x v1\n",
+        "test/core/a_test.dart": "import 'package:my_flutter_app/core/a.dart';\n",
+    }
+    HEAD_CHANGES = {
+        "AGENTS.md": "line ONE\nline two\nline three\n",
+        "lib/core/a.dart": "// a v2\n",
+        "lib/core/gone.dart": None,
+        "lib/core/new.dart": "// new\n",
+        "lib/core/needs.dart": "import 'missing.dart';\n",
+        "lib/features/home/home_module.dart": "// module\n",
+        "scripts/tool.sh": "echo v2\n",
+        "scripts/feature_templates/x.tpl": "x v2\n",
+        "test/core/new_test.dart": "import 'package:my_flutter_app/core/new.dart';\n",
+    }
+    IDENT = ["-c", "user.name=t", "-c", "user.email=t@t"]
+
+    def _template(self, root: Path) -> Path:
+        tpl = root / "template"
+        tpl.mkdir()
+        run_command(["git", "init", "-q"], cwd=tpl)
+        for files in (self.BASE_FILES, self.HEAD_CHANGES):
+            for rel, text in files.items():
+                path = tpl / rel
+                if text is None:
+                    path.unlink()
+                    continue
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+            run_command(["git", "add", "-A"], cwd=tpl)
+            run_command(["git", *self.IDENT, "commit", "-qm", "c"], cwd=tpl)
+        return tpl
+
+    def _app(self, root: Path, edits: dict) -> Path:
+        app = root / "app"
+        for rel, text in self.BASE_FILES.items():
+            path = app / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text.replace("my_flutter_app", "demo_app"))
+        (app / "pubspec.yaml").write_text("name: demo_app\n")
+        for rel, text in edits.items():
+            path = app / rel
+            if text is None:
+                shutil.rmtree(path) if path.is_dir() else path.unlink()
+            else:
+                path.write_text(text)
+        run_command(["git", "init", "-q"], cwd=app)
+        run_command(["git", "add", "-A"], cwd=app)
+        run_command(["git", *self.IDENT, "commit", "-qm", "app"], cwd=app)
+        return app
+
+    def _run(self, tpl: Path, app: Path, *extra: str) -> subprocess.CompletedProcess:
+        return run_command(
+            ["uv", "run", "--no-project", str(self.HELPER), "--template", str(tpl),
+             "--app", str(app), "--base", "HEAD~1", *extra],
+            cwd=app,
+        )
+
+    def _section(self, stdout: str, action: str) -> str:
+        match = re.search(rf"^{action} \(\d+\):\n((?:  .*\n)*)", stdout, re.M)
+        return match.group(1) if match else ""
+
+    def test_plan_classifies_every_change_and_applies_only_safe_ones(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_plan_") as raw:
+            root = Path(raw).resolve()
+            tpl = self._template(root)
+            app = self._app(root, {
+                "lib/features/home": None,              # demo feature removed
+                "scripts/feature_templates": None,      # app has no feature templates
+                "scripts/tool.sh": "echo custom\n",     # same line as the template change
+                "AGENTS.md": "line one\nline two\nline three\napp rule\n",
+            })
+            result = self._run(tpl, app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            out = result.stdout
+            self.assertIn("scripts/tool.sh", self._section(out, "CONFLICT"))
+            self.assertIn("AGENTS.md", self._section(out, "merge"))
+            self.assertIn("lib/core/a.dart", self._section(out, "take"))
+            self.assertIn("lib/core/new.dart", self._section(out, "add"))
+            self.assertIn("test/core/new_test.dart", self._section(out, "add"))
+            self.assertIn("lib/core/gone.dart", self._section(out, "delete"))
+            skipped = self._section(out, "skip")
+            self.assertIn("lib/features/home/home_module.dart  (feature 'home' not in app)", skipped)
+            self.assertIn("lib/core/needs.dart  (needs lib/core/missing.dart)", skipped)
+            self.assertIn("scripts/feature_templates/x.tpl", self._section(out, "absent"))
+
+            self.assertEqual((app / "AGENTS.md").read_text(), "line ONE\nline two\nline three\napp rule\n")
+            self.assertEqual((app / "lib/core/a.dart").read_text(), "// a v2\n")
+            self.assertIn("<<<<<<< app", (app / "scripts/tool.sh").read_text())
+            self.assertFalse((app / "lib/core/gone.dart").exists())
+            self.assertFalse((app / "lib/core/needs.dart").exists())
+            self.assertFalse((app / "lib/features/home").exists())
+            self.assertFalse((app / "scripts/feature_templates").exists())
+            self.assertIn("demo_app", (app / "test/core/new_test.dart").read_text())
+            self.assertEqual(run_command(["git", "diff", "--cached", "--name-only"], cwd=app).stdout, "")
+
+    def test_diverged_app_gets_the_plan_but_no_writes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_plan_") as raw:
+            root = Path(raw).resolve()
+            tpl = self._template(root)
+            app = self._app(root, {
+                "lib/features/home": None,
+                "scripts/feature_templates": None,
+                "scripts/tool.sh": "echo custom\n",
+                "AGENTS.md": "ours\n",
+                "lib/core/a.dart": "// ours\n",
+                "test/core/a_test.dart": "// ours\n",
+            })
+            before = tree_snapshot(app)
+            result = self._run(tpl, app)
+            self.assertEqual(result.returncode, 3, msg=fmt(result))
+            self.assertIn("DIVERGED", result.stdout)
+            self.assertEqual(tree_snapshot(app), before)
+            forced = self._run(tpl, app, "--apply-diverged")
+            self.assertEqual(forced.returncode, 0, msg=fmt(forced))
+            self.assertTrue((app / "lib/core/new.dart").exists())
+
+
 class TestUpgradeHelper(unittest.TestCase):
     """prepare_upgrade.py (flutterforge-upgrade skill) against this repository's
     own committed history: base detection, 3-way staging, and the stamp."""
@@ -1853,7 +1982,6 @@ class TestUpgradeHelper(unittest.TestCase):
             self.assertIn("# app customization", custom.read_text())
             stamp = json.loads((app / ".flutterforge.json").read_text())
             self.assertEqual(stamp["templateCommit"], self.head)
-            self.assertFalse((app / ".git" / "CHERRY_PICK_HEAD").exists())
 
     def test_stamp_at_head_reports_up_to_date(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:

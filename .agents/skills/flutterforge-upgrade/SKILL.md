@@ -19,7 +19,7 @@ changes**. Never commit, push, or delete app-owned code without the user's OK.
 Old apps do not contain this skill or its helper; always run the helper from
 the **template's** copy: `<template>/.agents/skills/flutterforge-upgrade/`.
 
-## 1. Stage the merge
+## 1. Plan, then apply
 
 The app must be a git repo with a clean tree. If it is not, ask the user to
 commit or stash; do not do it for them.
@@ -28,34 +28,52 @@ commit or stash; do not do it for them.
 uv run --no-project <template>/.agents/skills/flutterforge-upgrade/prepare_upgrade.py --template <template> --dry-run
 ```
 
-Read the report: base revision (and why it was chosen), template commits,
-changed files, dependency changes. The base comes from `.flutterforge.json`
-when present, otherwise from matching the app's files against every template
-commit. If the match count is low or the user knows the real base, pass
-`--base <rev>`. Then run the same command **without** `--dry-run`.
+The helper rebuilds what the generator shipped at BASE (what the app came
+from: `.flutterforge.json`, else the best file match) and at HEAD, then
+classifies every file the template changed against the app's copy:
 
-What it does: rebuilds exactly what the generator shipped at BASE and at HEAD
-(same package name; Counter removal mirrored when the app removed the demo),
-then cherry-picks BASE→HEAD into a new branch `flutterforge-upgrade-<sha>` with
-`--no-commit`. Untouched files update, files the template deleted are deleted,
-and files the app customized come back as ordinary merge conflicts. It also
-writes `.flutterforge.json` so the next upgrade knows its base.
+| Action | Meaning | On apply |
+| --- | --- | --- |
+| `take` | app still has the base version | replaced by the template's |
+| `merge` | both changed it, edits don't overlap | 3-way merged |
+| `CONFLICT` | both changed the same lines | written with `<<<<<<< app` / `>>>>>>> template` markers |
+| `add` | new template file where the app has that area | created |
+| `delete` | template deleted it, app never changed it | deleted |
+| `keep` | template deleted it, app changed it | left alone — review |
+| `skip` | new file with no place in the app (missing feature/folder) or importing something the app won't have | not written |
+| `absent` | template changed a file the app removed or moved | not written |
 
-## 2. Resolve conflicts
+Show the user the plan. Check the base line: if the match count is low or the
+user knows the real base, rerun with `--base <rev>`. Then run without
+`--dry-run`: it writes the plan on a new branch `flutterforge-upgrade-<sha>`,
+stages and commits nothing, and records the new base in `.flutterforge.json`.
 
-List them with `git diff --name-only --diff-filter=U`. Per file:
+**Diverged apps.** When under 25% of the base template files are unchanged in
+the app, the report says `DIVERGED` and nothing is written. Such an app has
+replaced template conventions (its own error type instead of fpdart, its own
+DI layout, its own generator). Either port the plan's `take`/`add` items by
+hand, or rerun with `--apply-diverged` and resolve every `CONFLICT` and
+`merge` under the convention rule below — always with the user's agreement.
+
+## 2. Resolve conflicts — the app's conventions win
+
+**Rule:** when the app replaced a template convention, keep the app's version
+of everything built on that convention (generators, feature templates, wiring
+files, error handling) and port only the template changes that do not depend
+on it (flags, output, speed, docs). Never introduce a convention the app
+dropped (e.g. fpdart `Either` code into an app without fpdart).
 
 | File kind | Resolution |
 | --- | --- |
-| Template tooling: `scripts/`, `.agents/skills/`, `test/support/architecture_checker.dart`, `test/architecture_test.dart`, `.github/workflows/flutter-ci.yml`, `remove_counter.sh` | Take the template side, then re-apply the app's change only if it was a deliberate customization. |
-| Shared docs/config: `AGENTS.md`, `README.md`, `analysis_options.yaml`, `l10n.yaml` | Keep both: the app's project-specific rules plus the template's new rules. Drop text the template removed. |
-| App code: `lib/`, `test/` (outside `test/support/`) | Keep the app's code. Port a template change only when it is infrastructure the app now needs (e.g. a new `core/` import). |
-| modify/delete (app deleted a file the template changed) | Keep it deleted unless the app still needs it. Never resurrect demo code (Counter, placeholder Home content) the app removed or replaced. |
+| Tooling the app never customized (`take`) | Already the template's version — nothing to do. |
+| Tooling the app customized: `scripts/`, `scripts/feature_templates/`, `test/support/architecture_checker.dart` | Keep the app's version; hand-port convention-free improvements from the template side. Skip helpers the app's own generator does not use (e.g. `fwire.py` when the app kept its own `fgen.sh`). |
+| Shared docs/config: `AGENTS.md`, `README.md`, `analysis_options.yaml`, `l10n.yaml` | Keep both: the app's project rules plus the template's new rules, minus text the template removed. |
+| App code: `lib/`, `test/` | Keep the app's code. Take a template change only when it is infrastructure the app now needs. |
+| `add` files | Check each one fits the app (e.g. a test of a core file the app does not use); delete what does not. |
+| `delete` / `keep` | Confirm with the user any deletion of something the app may still use. |
 
-`git add` each resolved file; finish when `git diff --name-only --diff-filter=U`
-is empty. Then review template deletions
-(`git diff --cached --name-status --diff-filter=D`) and confirm with the user
-any deletion of something the app may still use (e.g. personal scripts).
+Resolve every marker (`git diff --check` and `grep -rn '<<<<<<< app'` find
+leftovers).
 
 ## 3. Dependencies and code generation
 

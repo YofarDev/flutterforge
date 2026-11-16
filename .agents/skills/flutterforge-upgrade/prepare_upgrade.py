@@ -1,18 +1,26 @@
-"""Stage a FlutterForge template upgrade in an existing app as a 3-way merge.
+"""Upgrade an existing app to a newer FlutterForge template, file by file.
 
 Rebuilds the template-owned files exactly as the generator shipped them at two
-template revisions (BASE: what the app was generated from; HEAD: the target),
-commits both into a throwaway reference repository, then cherry-picks the
-BASE→HEAD change into the app with `--no-commit`. Files the app customized
-get ordinary merge conflicts instead of being overwritten; nothing is
-committed or pushed.
+template revisions (BASE: what the app was generated from; HEAD: the target)
+and classifies every file the template changed:
 
-Usage (from anywhere; stdlib only):
+  take      app still has the base version  -> replaced by the template's
+  merge     app and template both changed it -> 3-way merged cleanly
+  CONFLICT  same, with overlapping edits     -> written with conflict markers
+  add       new template file, the app has its area -> created
+  delete    template deleted it, app never changed it -> deleted
+  keep      template deleted it, app changed it -> left alone (review)
+  skip      new file the app has no place for (missing feature/folder, or
+            it imports something the app will not have)
+  absent    template changed a file the app removed or moved -> left alone
+
+Nothing is staged or committed. When less than 25% of the base template files
+are unchanged in the app, the app counts as DIVERGED and the plan is only
+printed unless --apply-diverged is given.
+
+Usage (stdlib only):
     uv run --no-project prepare_upgrade.py --template PATH [--app PATH]
-        [--base REV] [--head REV] [--dry-run]
-
-Prints a compact report: chosen base (and why), template commits applied,
-changed/deleted files, conflicts, and dependency changes to apply by hand.
+        [--base REV] [--head REV] [--dry-run] [--apply-diverged]
 """
 from __future__ import annotations
 
@@ -22,7 +30,6 @@ import io
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -206,13 +213,155 @@ def dependency_changes(template: Path, base: str, head: str) -> list[str]:
     return lines
 
 
+DART_DIRECTIVE = re.compile(r"""^\s*(?:import|export|part)\s+['"]([^'"]+)['"]""", re.M)
+DIVERGED_RATIO = 0.25
+
+
+def read_tree(root: Path) -> dict[str, bytes]:
+    return {str(f.relative_to(root)): f.read_bytes() for f in root.rglob("*") if f.is_file()}
+
+
+def local_deps(path: str, text: bytes, package: str) -> list[str]:
+    """App-relative files a Dart file imports/exports/parts (generated ones excluded)."""
+    if not path.endswith(".dart"):
+        return []
+    deps = []
+    for uri in DART_DIRECTIVE.findall(text.decode("utf-8", errors="replace")):
+        if uri.startswith(f"package:{package}/"):
+            target = "lib/" + uri[len(f"package:{package}/"):]
+        elif ":" in uri:
+            continue  # dart:, other packages
+        else:
+            target = os.path.normpath(os.path.join(os.path.dirname(path), uri))
+        if "/generated/" in target or target.endswith((".g.dart", ".freezed.dart")):
+            continue
+        deps.append(target)
+    return deps
+
+
+def area_missing(path: str, app: Path) -> str | None:
+    """Why a NEW template file has no place in this app, or None."""
+    parts = path.split("/")
+    if len(parts) > 3 and parts[0] in ("lib", "test") and parts[1] == "features":
+        if not (app / parts[0] / "features" / parts[2]).is_dir():
+            return f"feature '{parts[2]}' not in app"
+    for root in (".agents", ".codex", "scripts/feature_templates"):
+        if path.startswith(root + "/") and not (app / root).is_dir():
+            return f"app has no {root}/"
+    if not (app / parts[0]).exists():
+        return f"app has no {parts[0]}/"
+    return None
+
+
+def merge3(app_text: bytes, base_text: bytes, head_text: bytes) -> tuple[bytes, bool]:
+    """git merge-file of app/base/template; returns (result, has_conflicts)."""
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        for name, data in (("app", app_text), ("base", base_text), ("template", head_text)):
+            (tmp / name).write_bytes(data)
+        result = run(["git", "merge-file", "-p", "-L", "app", "-L", "base", "-L", "template",
+                      str(tmp / "app"), str(tmp / "base"), str(tmp / "template")], check=False)
+        if result.returncode < 0:
+            sys.exit(f"error: git merge-file failed: {result.stderr.decode(errors='replace')}")
+        return result.stdout, result.returncode > 0
+
+
+def plan_upgrade(app: Path, package: str, base_tree: dict[str, bytes],
+                 head_tree: dict[str, bytes]) -> tuple[list[tuple[str, str, str]], dict[str, bytes], float]:
+    """Classifies every template-owned path. Returns (rows, writes, match_ratio):
+    rows are (action, path, note); writes maps path -> new bytes (None = delete)."""
+    rows: list[tuple[str, str, str]] = []
+    writes: dict[str, bytes | None] = {}
+    base_files = [p for p in base_tree if (app / p).is_file()]
+    same = sum((app / p).read_bytes() == base_tree[p] for p in base_files)
+    ratio = same / len(base_tree) if base_tree else 1.0
+
+    for path in sorted(set(base_tree) | set(head_tree)):
+        b, h = base_tree.get(path), head_tree.get(path)
+        if b == h:
+            continue
+        a = (app / path).read_bytes() if (app / path).is_file() else None
+        if a == h:
+            continue
+        if b is None:  # template added the file
+            if a is None:
+                why = area_missing(path, app)
+                if why:
+                    rows.append(("skip", path, why))
+                else:
+                    rows.append(("add", path, ""))
+                    writes[path] = h
+            else:
+                merged, conflict = merge3(a, b"", h)
+                rows.append(("CONFLICT" if conflict else "merge", path, "both added"))
+                writes[path] = merged
+        elif h is None:  # template deleted the file
+            if a is None:
+                continue
+            if a == b:
+                rows.append(("delete", path, ""))
+                writes[path] = None
+            else:
+                rows.append(("keep", path, "template deleted it; app changed it: review"))
+        elif a is None:  # template changed a file the app does not have
+            rows.append(("absent", path, "app removed or moved it"))
+        elif a == b:
+            rows.append(("take", path, ""))
+            writes[path] = h
+        else:
+            merged, conflict = merge3(a, b, h)
+            rows.append(("CONFLICT" if conflict else "merge", path, ""))
+            writes[path] = merged
+
+    # A new/updated Dart file must not import something this app will not have.
+    def exists_after(target: str) -> bool:
+        if target in writes:
+            return writes[target] is not None
+        return (app / target).is_file()
+
+    changed = True
+    while changed:
+        changed = False
+        for path, data in list(writes.items()):
+            if data is None:
+                continue
+            missing = [d for d in local_deps(path, data, package) if not exists_after(d)]
+            if missing:
+                del writes[path]
+                rows = [(("skip", p, f"needs {missing[0]}") if p == path else (act, p, note))
+                        for act, p, note in rows]
+                changed = True
+    return rows, writes, ratio
+
+
+def print_plan(rows: list[tuple[str, str, str]]) -> None:
+    order = ["CONFLICT", "merge", "take", "add", "delete", "keep", "skip", "absent"]
+    for action in order:
+        group = [(p, n) for a, p, n in rows if a == action]
+        if not group:
+            continue
+        print(f"{action} ({len(group)}):")
+        if action in ("skip", "absent") and len(group) > 8:
+            by_dir: dict[tuple[str, str], list[str]] = {}
+            for p, n in group:
+                by_dir.setdefault((os.path.dirname(p), n), []).append(p)
+            for (folder, note), paths in sorted(by_dir.items()):
+                shown = paths[0] if len(paths) == 1 else f"{folder}/ x{len(paths)}"
+                print(f"  {shown}  ({note})")
+        else:
+            for p, n in group:
+                print(f"  {p}" + (f"  ({n})" if n else ""))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--template", required=True, type=Path)
     parser.add_argument("--app", default=Path.cwd(), type=Path)
     parser.add_argument("--base", help="template revision the app was generated from")
     parser.add_argument("--head", default="HEAD", help="template revision to upgrade to")
-    parser.add_argument("--dry-run", action="store_true", help="report only; change nothing")
+    parser.add_argument("--dry-run", action="store_true", help="print the plan; change nothing")
+    parser.add_argument("--apply-diverged", action="store_true",
+                        help="apply the plan even when the app has diverged from the template")
     args = parser.parse_args()
     template, app = args.template.resolve(), args.app.resolve()
 
@@ -244,56 +393,53 @@ def main() -> int:
         print("Already up to date.")
         return 0
     log = git(template, "log", "--oneline", "--no-decorate", f"{base}..{head}").splitlines()
-    print(f"template commits applied ({len(log)}):")
+    print(f"template commits ({len(log)}):")
     for line in log[:40]:
         print(f"  {line}")
 
     with tempfile.TemporaryDirectory(prefix="flutterforge-upgrade-") as raw:
-        tmp = Path(raw)
-        ref = tmp / "ref"
-        ref.mkdir()
-        git(ref, "init", "-q")
-        ident = ["-c", "user.name=flutterforge", "-c", "user.email=flutterforge@localhost"]
+        trees = {}
         for label, rev in (("base", base), ("head", head)):
-            git(ref, "rm", "-rq", "--ignore-unmatch", ".")
-            build_tree(template, rev, package, ref, with_counter)
-            git(ref, "add", "-A")
-            git(ref, *ident, "commit", "-q", "--allow-empty", "-m", f"template {label} {rev[:10]}")
-        changes = git(ref, "diff", "--name-status", "HEAD~1", "HEAD").splitlines()
-        print(f"template-owned files changed: {len(changes)}")
-        for line in changes:
-            print(f"  {line}")
-        deps = dependency_changes(template, base, head)
-        if deps:
-            print("dependency changes (apply with the commands shown):")
-            print("\n".join(deps))
-        if args.dry_run:
-            print("dry run: nothing changed.")
-            return 0
+            out = Path(raw) / label
+            out.mkdir()
+            build_tree(template, rev, package, out, with_counter)
+            trees[label] = read_tree(out)
+    rows, writes, ratio = plan_upgrade(app, package, trees["base"], trees["head"])
+    diverged = ratio < DIVERGED_RATIO
+    print(f"match:    {ratio:.0%} of the base template files are unchanged in the app"
+          + ("  -> DIVERGED" if diverged else ""))
+    print_plan(rows)
+    deps = dependency_changes(template, base, head)
+    if deps:
+        print("dependency changes (apply with the commands shown):")
+        print("\n".join(deps))
+    if args.dry_run:
+        print("dry run: nothing changed.")
+        return 0
+    if diverged and not args.apply_diverged:
+        print("Not applied: the app diverged from the template. Review the plan; port by hand, or")
+        print("rerun with --apply-diverged and resolve CONFLICT files keeping the app's conventions.")
+        return 3
 
-        branch = f"flutterforge-upgrade-{head[:7]}"
-        git(app, "switch", "-c", branch)
-        git(app, "fetch", "-q", "--no-tags", str(ref), "HEAD")
-        picked = run(["git", "-C", str(app), *ident, "cherry-pick", "--no-commit",
-                      "FETCH_HEAD"], check=False)
-    git(app, "cherry-pick", "--quit", check=False)  # keep changes, drop sequencer state
-
+    branch = f"flutterforge-upgrade-{head[:7]}"
+    git(app, "switch", "-c", branch)
+    for path, data in writes.items():
+        target = app / path
+        if data is None:
+            target.unlink()
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
     (app / STAMP).write_text(json.dumps({
         "templateCommit": head,
         "upgradedFrom": base,
         "upgradedAt": datetime.date.today().isoformat(),
     }, indent=2) + "\n")
-    conflicts = git(app, "diff", "--name-only", "--diff-filter=U").split()
-    print(f"branch:   {branch} (nothing committed)")
-    if conflicts:
-        print(f"CONFLICTS ({len(conflicts)}) — resolve each, then `git add` it:")
-        for path in conflicts:
-            print(f"  {path}")
-    elif picked.returncode != 0:
-        print(picked.stderr.decode(errors="replace")[-2000:])
-        return 1
-    else:
-        print("merged cleanly.")
+    conflicts = [p for a, p, _ in rows if a == "CONFLICT"]
+    print(f"branch:   {branch} (nothing staged or committed)")
+    print(f"applied {len(writes)} change(s); "
+          + (f"{len(conflicts)} file(s) have conflict markers to resolve." if conflicts
+             else "no conflicts."))
     print(f"wrote {STAMP} (records the new base for the next upgrade)")
     return 0
 

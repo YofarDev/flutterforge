@@ -305,12 +305,14 @@ uv run --no-project <template>/.agents/skills/flutterforge-upgrade/prepare_upgra
 ```
 
 The helper rebuilds what the generator shipped at the app's original template
-commit and at the target commit, then 3-way merges the difference into a new
-branch without committing: untouched files update, customized files become
-merge conflicts, and the Counter demo stays removed if the app removed it.
-The agent then resolves conflicts, applies the reported dependency changes,
-adopts opt-in code migrations, and runs `./scripts/fverify.sh --fix`. Each
-upgrade writes `.flutterforge.json` so the next one knows its starting point.
+commit and at the target commit, then plans every changed file against the
+app: files the app never touched are updated, files both sides changed are
+3-way merged (conflict markers where edits overlap), new files are added only
+where the app has that area, and changes to things the app removed are
+skipped. Nothing is staged or committed; apps that diverged heavily get the
+plan only. The agent then resolves conflicts (the app's own conventions win),
+applies the reported dependency changes, adopts opt-in code migrations, and
+runs `./scripts/fverify.sh --fix`. Each upgrade writes `.flutterforge.json` so the next one knows its starting point.
 
 ---
 
