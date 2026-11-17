@@ -35,6 +35,8 @@ import 'support/architecture_checker.dart';
 /// checker together with a negative test proving a violation is reported
 /// (in the template repository: `tools/checker_tests/`).
 void main() {
+  // Resolving all of lib/ with the analyzer can exceed the 30 s default
+  // timeout on a cold cache or a slow CI runner.
   test('lib/ respects the architecture boundaries', () async {
     final CheckerResult result = await ArchitectureChecker.checkDirectory();
     expect(
@@ -52,5 +54,5 @@ void main() {
           'Architecture boundary violations:\n'
           '${result.violations.join('\n')}',
     );
-  });
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }
