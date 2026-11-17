@@ -2,6 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:my_flutter_app/core/bloc/latest_request_wins.dart';
+import 'package:my_flutter_app/core/l10n/app_localization_delegates.dart';
 import 'package:my_flutter_app/core/l10n/generated/app_localizations.dart';
 import 'package:my_flutter_app/core/models/failure.dart';
 import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
@@ -44,7 +45,7 @@ void main() {
 
     Widget buildTestableWidget(Widget child) {
       return MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: appLocalizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         locale: const Locale('en'),
         home: BlocProvider<HomeCubit>.value(value: fakeHomeCubit, child: child),

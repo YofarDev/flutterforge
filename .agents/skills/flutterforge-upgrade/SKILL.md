@@ -135,6 +135,11 @@ apply what fits, smallest change first, re-running `fverify` after each:
   `GlobalWidgetsLocalizations` from `flutter_localizations` (`show` both); add
   `header: "// ignore_for_file: deprecated_member_use"` to `l10n.yaml` and
   re-run `flutter gen-l10n`.
+- **Localization delegates** (`lib/core/l10n/app_localization_delegates.dart`):
+  on `material_ui`, use `appLocalizationsDelegates` in `MaterialApp` and in
+  widget tests instead of the generated
+  `AppLocalizations.localizationsDelegates`, whose deprecated Material and
+  Cupertino delegates break every non-English locale.
 - **One-command gate**: use `./scripts/fverify.sh --fix` instead of separate
   `dart fix` / `dart format` / `fverify` calls in any app docs or CI notes.
 

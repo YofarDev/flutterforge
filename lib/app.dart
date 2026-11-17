@@ -1,10 +1,7 @@
-import 'package:cupertino_ui/cupertino_ui.dart'
-    show GlobalCupertinoLocalizations;
-import 'package:flutter_localizations/flutter_localizations.dart'
-    show GlobalWidgetsLocalizations;
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'core/l10n/app_localization_delegates.dart';
 import 'core/l10n/generated/app_localizations.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -45,12 +42,7 @@ class _MyAppState extends State<MyApp> {
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.dark,
       routerConfig: _effectiveRouter,
-      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
-        AppLocalizations.delegate,
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: const <Locale>[Locale('en'), Locale('fr')],
       // No forced `locale:`: the app follows the device locale.
     );

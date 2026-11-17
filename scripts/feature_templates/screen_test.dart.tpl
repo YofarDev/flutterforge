@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:{{PROJECT_NAME}}/core/bloc/latest_request_wins.dart';
 import 'package:{{PROJECT_NAME}}/core/l10n/failure_localization.dart';
+import 'package:{{PROJECT_NAME}}/core/l10n/app_localization_delegates.dart';
 import 'package:{{PROJECT_NAME}}/core/l10n/generated/app_localizations.dart';
 import 'package:{{PROJECT_NAME}}/core/models/failure.dart';
 import 'package:{{PROJECT_NAME}}/features/{{FEATURE_SNAKE}}/domain/models/{{FEATURE_SNAKE}}.dart';
@@ -38,7 +39,7 @@ void main() {
     Locale locale = const Locale('en'),
   }) {
     return MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: appLocalizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       locale: locale,
       home: child,
