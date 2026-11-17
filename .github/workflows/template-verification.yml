@@ -5,7 +5,7 @@
 # (see scripts/verify_template.sh and docs/compatibility.md).
 #
 # Lanes:
-#   * linux / pinned-baseline — Flutter 3.47.4 (the verified baseline).
+#   * linux / pinned-baseline — Flutter 3.50.0 (the verified baseline).
 #   * linux / current-stable  — latest stable Flutter, to detect drift.
 #     An older pinned lane alone would not demonstrate latest-stable
 #     compatibility; this lane is labeled accordingly and is allowed to be
@@ -50,7 +50,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.47.4
+          flutter-version: 3.50.0
           cache: true
 
       - name: Fast suite (refusals, parsing, staging, shell contract)
@@ -64,17 +64,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux, Flutter 3.47.4 baseline
+          - name: Linux, Flutter 3.50.0 baseline
             os: ubuntu-latest
-            flutter-version: 3.47.4
+            flutter-version: 3.50.0
             channel: stable
           - name: Linux, current stable
             os: ubuntu-latest
             flutter-version: ""
             channel: stable
-          - name: macOS, Flutter 3.47.4 baseline
+          - name: macOS, Flutter 3.50.0 baseline
             os: macos-latest
-            flutter-version: 3.47.4
+            flutter-version: 3.50.0
             channel: stable
     steps:
       - name: Checkout (read-only)

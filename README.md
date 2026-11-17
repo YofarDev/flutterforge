@@ -105,7 +105,7 @@ Additional rules:
 | Models           | freezed + json_serializable                        |
 | Testing          | mocktail + bloc_test                               |
 | Localization     | flutter_localizations + intl                       |
-| Theming          | Material 3, light/dark                             |
+| Theming          | Material 3 (material_ui), light/dark               |
 
 ### CLI Scripts
 
@@ -365,7 +365,7 @@ so template-level checks run either against fake tools (fast level) or through
 disposable generated apps (full smoke). CI
 (`.github/workflows/template-verification.yml`) has been added and validated
 locally only; it has not yet run remotely. It targets the fast suite plus the
-full smoke on Linux (pinned 3.47.4 baseline and current stable) and macOS
+full smoke on Linux (pinned 3.50.0 baseline and current stable) and macOS
 (baseline). Supported SDK/tool prerequisites and the minimum-version policy are
 documented in [docs/compatibility.md](docs/compatibility.md).
 

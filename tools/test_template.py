@@ -730,7 +730,7 @@ class TestShellContract(unittest.TestCase):
             (app / "lib").mkdir(parents=True)
             (app / "pubspec.yaml").write_text("name: fake_app\n")
             (app / "lib" / "foo.dart").write_text(
-                "import 'package:flutter/material.dart';\n"
+                "import 'package:material_ui/material_ui.dart';\n"
                 "class Foo extends StatelessWidget {\n"
                 "  const Foo({super.key});\n"
                 "  @override\n"
@@ -2131,6 +2131,8 @@ class TestPackageSpecs(unittest.TestCase):
             "fpdart",
             "bloc_test",
             "mocktail",
+            "material_ui",
+            "cupertino_ui",
         ):
             self.assertIn(f"{package}:", joined)
 

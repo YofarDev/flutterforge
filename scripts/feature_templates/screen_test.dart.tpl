@@ -1,6 +1,6 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:{{PROJECT_NAME}}/core/bloc/latest_request_wins.dart';
 import 'package:{{PROJECT_NAME}}/core/l10n/failure_localization.dart';
 import 'package:{{PROJECT_NAME}}/core/l10n/generated/app_localizations.dart';

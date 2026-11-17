@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:{{PROJECT_NAME}}/core/l10n/generated/app_localizations.dart';
 import 'package:{{PROJECT_NAME}}/core/router/route_constants.dart';
 import 'package:{{PROJECT_NAME}}/features/{{FEATURE_SNAKE}}/data/datasources/{{FEATURE_SNAKE}}_remote_datasource.dart';

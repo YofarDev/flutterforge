@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// App theme configuration (Material 3).
 /// Customize seedColor and other properties here.

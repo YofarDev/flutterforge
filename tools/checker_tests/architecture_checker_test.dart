@@ -136,6 +136,42 @@ class AlphaModel {
       );
     });
 
+    test('domain importing material_ui is rejected', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/domain/models/alpha_model.dart': '''
+import 'package:material_ui/material_ui.dart';
+
+class AlphaModel {
+  const AlphaModel(this.id);
+  final String id;
+  Color get color => Colors.blue;
+}
+''',
+        }),
+        'domain-purity',
+        'domain importing material_ui',
+      );
+    });
+
+    test('domain importing cupertino_ui is rejected', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/domain/models/alpha_model.dart': '''
+import 'package:cupertino_ui/cupertino_ui.dart';
+
+class AlphaModel {
+  const AlphaModel(this.id);
+  final String id;
+  Color get color => CupertinoColors.systemBlue;
+}
+''',
+        }),
+        'domain-purity',
+        'domain importing cupertino_ui',
+      );
+    });
+
     test('domain importing generated localizations is rejected', () async {
       await expectDomainForbidden(
         "import '../../../../core/l10n/generated/app_localizations.dart';",
@@ -605,7 +641,7 @@ class MirrorCubit extends Cubit<AlphaState3> {
       await expectViolation(
         fixtureWith(<String, String>{
           'lib/features/alpha/presentation/screens/alpha_screen.dart': '''
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/di/service_locator.dart';
@@ -769,7 +805,7 @@ final Object alphaRegistration = registerAlphaFeature;
       await expectViolation(
         fixtureWith(<String, String>{
           'lib/main.dart': '''
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'app.dart';
 import 'core/di/service_locator.dart';
@@ -834,7 +870,7 @@ class AlphaService {
       await expectViolation(
         fixtureWith(<String, String>{
           'lib/features/alpha/presentation/screens/alpha_screen.dart': '''
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import
@@ -945,7 +981,7 @@ class FreezedJunk {
 }
 ''',
           'lib/core/l10n/generated/app_localizations.dart': '''
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../features/alpha/data/datasources/alpha_remote_datasource.dart';
 class AppLocalizations {}
 ''',

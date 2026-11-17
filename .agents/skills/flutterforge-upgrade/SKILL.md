@@ -126,6 +126,15 @@ apply what fits, smallest change first, re-running `fverify` after each:
 - **fpdart imports**: generated code now uses `show Either, ...` so a feature
   named like an fpdart type (e.g. `order`) compiles; apply the same fix if a
   name clash appears.
+- **Flutter 3.50 `material_ui`** (required once the app moves to Flutter
+  ≥ 3.50): `flutter pub add material_ui cupertino_ui`; replace every
+  `package:flutter/material.dart` import with
+  `package:material_ui/material_ui.dart` (and `flutter/cupertino.dart` with
+  `cupertino_ui/cupertino_ui.dart`); in `app.dart` take
+  `GlobalCupertinoLocalizations` from `cupertino_ui` and only
+  `GlobalWidgetsLocalizations` from `flutter_localizations` (`show` both); add
+  `header: "// ignore_for_file: deprecated_member_use"` to `l10n.yaml` and
+  re-run `flutter gen-l10n`.
 - **One-command gate**: use `./scripts/fverify.sh --fix` instead of separate
   `dart fix` / `dart format` / `fverify` calls in any app docs or CI notes.
 

@@ -240,7 +240,7 @@ class AlphaModel {
       final CheckerResult result = await ArchitectureChecker.checkSources(
         fixtureWith(<String, String>{
           'lib/core/ui_bridge.g.dart':
-              "export 'package:flutter/material.dart';\n",
+              "export 'package:material_ui/material_ui.dart';\n",
           'lib/features/alpha/domain/models/alpha_model.dart': '''
 import '../../../../core/ui_bridge.g.dart';
 
@@ -266,7 +266,7 @@ class AlphaModel {
               "export 'pure.dart' if (dart.library.html) 'ui_bridge.g.dart';\n",
           'lib/core/pure.dart': 'class Pure {}\n',
           'lib/core/ui_bridge.g.dart':
-              "export 'package:flutter/material.dart';\n",
+              "export 'package:material_ui/material_ui.dart';\n",
           'lib/features/alpha/domain/models/alpha_model.dart': withImport(
             fixtureApp['lib/features/alpha/domain/models/alpha_model.dart']!,
             "import '../../../../core/shared.dart';",
@@ -316,7 +316,7 @@ class AlphaModel {
     Map<String, String> buildContextThroughBarrel(String importLine) =>
         fixtureWith(<String, String>{
           'lib/core/shared.dart': '''
-export 'package:flutter/material.dart';
+export 'package:material_ui/material_ui.dart';
 ''',
           'lib/features/alpha/domain/models/alpha_model.dart':
               '''
@@ -384,7 +384,7 @@ class AlphaModel {
 export 'shared_impl.dart';
 ''',
           'lib/core/shared_impl.dart': '''
-export 'package:flutter/material.dart';
+export 'package:material_ui/material_ui.dart';
 ''',
           'lib/features/alpha/domain/models/alpha_model.dart': withImport(
             fixtureApp['lib/features/alpha/domain/models/alpha_model.dart']!,
@@ -424,7 +424,7 @@ class PureModel {
 }
 ''',
           'lib/core/ui_reexport.dart': '''
-export 'package:flutter/material.dart';
+export 'package:material_ui/material_ui.dart';
 ''',
           'lib/features/alpha/domain/models/alpha_model.dart': withImport(
             fixtureApp['lib/features/alpha/domain/models/alpha_model.dart']!,

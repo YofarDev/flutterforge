@@ -9,11 +9,18 @@ counterpart of this document is `scripts/verify_template.sh` (see
 
 | Component   | Baseline                  | Notes                                           |
 | ----------- | ------------------------- | ----------------------------------------------- |
-| Flutter SDK | 3.47.4 (stable channel)   | The version the October 2026 review verified against. CI pins this lane. |
-| Dart SDK    | 3.13.3                    | Ships with Flutter 3.47.4.                      |
+| Flutter SDK | 3.50.0 (stable channel)   | Verified November 2026 (full smoke). CI pins this lane. |
+| Dart SDK    | 3.14.0                    | Ships with Flutter 3.50.0.                      |
 | uv          | any recent (≥ 0.12 verified) | Required by `fgen`/`fstr`/`fl10n`/`fimp`/`remove_counter.sh` and the root test harness. |
 | Bash        | ≥ 3.2 (macOS stock)       | See the shell contract below.                   |
 | OS          | macOS (arm64) and Linux   | Both exercised in CI (macOS: baseline lane only). |
+
+Flutter 3.50 moved Material and Cupertino out of the SDK into the
+`material_ui` and `cupertino_ui` packages, so the template imports
+`package:material_ui/material_ui.dart` (never `package:flutter/material.dart`)
+and **does not support Flutter older than 3.50**. `flutter gen-l10n` still
+emits the deprecated `flutter_localizations` delegates; `l10n.yaml` adds an
+`ignore_for_file: deprecated_member_use` header to the generated files only.
 
 A separate **current-stable** CI lane runs the full smoke suite against the
 latest stable Flutter to detect compatibility drift. The pinned baseline lane
@@ -72,6 +79,8 @@ the current-stable lane), update this table, and let the smoke suite regenerate.
 | json_annotation    | `^4.12.0`               | 4.12.0                    |
 | get_it             | `^9.0.0`                | 9.3.0                     |
 | fpdart             | `^1.0.0`                | 1.2.0                     |
+| material_ui        | `^1.11.0`               | 1.11.1                    |
+| cupertino_ui       | `^1.1.0`                | 1.1.7                     |
 | flutter_lints      | `^6.0.0` (dev)          | 6.0.0                     |
 | bloc_test          | `^10.0.0` (dev)         | 10.0.0                    |
 | mocktail           | `^1.0.4` (dev)          | 1.0.5                     |
@@ -106,7 +115,7 @@ pushes to `main` (the repository's default branch):
 - **fast** — Linux, the fake-tool generator/refusal/shell-contract suite
   (~seconds).
 - **smoke** — the full real-Flutter suite on three lanes: Linux pinned
-  3.47.4 baseline, Linux current stable, macOS pinned baseline. Jobs are
+  3.50.0 baseline, Linux current stable, macOS pinned baseline. Jobs are
   read-only (`permissions: contents: read`), time out after 60 minutes, and
   superseded runs are cancelled. On failure, the smoke artifacts (logs,
   Flutter/Dart versions, template git revision, resolved generated
