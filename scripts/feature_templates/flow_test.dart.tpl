@@ -38,6 +38,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Data: Flow'), findsOneWidget);
+    expect(
+      find.text(lookupAppLocalizations(const Locale('en')).{{L10N_DATA_KEY}}('Flow')),
+      findsOneWidget,
+    );
   });
 }

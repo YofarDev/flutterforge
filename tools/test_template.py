@@ -86,6 +86,9 @@ if [ -n "${FORGE_FAKE_DART_FAIL:-}" ]; then
   echo 'fake-dart: simulated failure' >&2
   exit 70
 fi
+if [ "${1:-}" = "fix" ] && [ "${2:-}" = "--dry-run" ]; then
+  echo "${FORGE_FAKE_FIX_PREVIEW:-3 proposed fixes in 2 files.}"
+fi
 exit 0
 """
 
@@ -1575,12 +1578,15 @@ class TestFverifyGate(unittest.TestCase):
     FORMAT_CHECK = ["format", "--output=none", "--set-exit-if-changed", "."]
 
     def _run(
-        self, args: list[str], *, flutter_fail: bool = False, dart_fail: bool = False
+        self, args: list[str], *, flutter_fail: bool = False, dart_fail: bool = False,
+        fix_preview: str | None = None,
     ) -> tuple[subprocess.CompletedProcess, list[list[str]]]:
         with tempfile.TemporaryDirectory(prefix="forge_fverify_") as raw:
             root = Path(raw).resolve()
             app = make_fake_app(root)
             env, log = fake_tool_env(root, flutter_fail=flutter_fail, dart_fail=dart_fail)
+            if fix_preview is not None:
+                env["FORGE_FAKE_FIX_PREVIEW"] = fix_preview
             result = subprocess.run(
                 [SYSTEM_BASH, str(REPO_ROOT / "scripts" / "fverify.sh"), *args],
                 cwd=str(app),
@@ -1610,6 +1616,7 @@ class TestFverifyGate(unittest.TestCase):
         self.assertEqual(
             calls,
             [
+                ["fix", "--dry-run"],
                 ["fix", "--apply"],
                 ["format", "."],
                 self.FORMAT_CHECK,
@@ -1617,6 +1624,17 @@ class TestFverifyGate(unittest.TestCase):
                 ["test", "--reporter", "failures-only"],
             ],
         )
+
+    def test_fix_refuses_a_sweeping_dart_fix_migration(self) -> None:
+        result, calls = self._run(["--fix"], fix_preview="1312 proposed fixes in 218 files.")
+        self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual(calls, [["fix", "--dry-run"]])
+        self.assertIn("218 files", result.stdout)
+
+    def test_fix_with_nothing_to_fix_skips_apply(self) -> None:
+        result, calls = self._run(["--fix"], fix_preview="Nothing to fix!")
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual(calls[:2], [["fix", "--dry-run"], ["format", "."]])
 
     def test_explicit_reporter_and_extra_arguments_are_forwarded(self) -> None:
         result, calls = self._run(["-r", "expanded", "--fix", "--coverage"])
@@ -1773,6 +1791,23 @@ class TestFwire(unittest.TestCase):
             result = self._run("check", app)
             self.assertEqual(result.returncode, 1, msg=fmt(result))
             self.assertIn("already exists", result.stderr)
+
+
+class TestFwireMultilineImports(unittest.TestCase):
+    def test_imports_go_after_a_multiline_import_statement(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fwire_ml_") as raw:
+            app = Path(raw).resolve()
+            locator = app / "lib/core/di/service_locator.dart"
+            locator.parent.mkdir(parents=True)
+            locator.write_text(
+                "import 'package:get_it/get_it.dart';\n"
+                "import '../../features/a/a.dart'\n    show A,\n        B;\n\n"
+                "void setup() {\n  // fgen:register-features\n}\n"
+            )
+            run_command(["uv", "run", "--no-project", str(REPO_ROOT / "scripts/fwire.py"), "apply",
+                         str(app), "shop", "Shop", "shop", "demo_app"], cwd=app)
+            text = locator.read_text()
+            self.assertIn("        B;\nimport '../../features/shop/shop_module.dart';\n", text)
 
 
 class TestUpgradePlan(unittest.TestCase):

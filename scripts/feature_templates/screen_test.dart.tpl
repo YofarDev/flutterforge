@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:{{PROJECT_NAME}}/core/bloc/latest_request_wins.dart';
+import 'package:{{PROJECT_NAME}}/core/l10n/failure_localization.dart';
 import 'package:{{PROJECT_NAME}}/core/l10n/generated/app_localizations.dart';
 import 'package:{{PROJECT_NAME}}/core/models/failure.dart';
 import 'package:{{PROJECT_NAME}}/features/{{FEATURE_SNAKE}}/domain/models/{{FEATURE_SNAKE}}.dart';
@@ -29,6 +30,9 @@ class Fake{{FEATURE_PASCAL}}Cubit extends Cubit<{{FEATURE_PASCAL}}State>
 /// failure category is localized (never a raw exception string), and the
 /// refresh action reaches the cubit.
 void main() {
+  // Expected copy comes from the app's own English strings, not literals.
+  final AppLocalizations en = lookupAppLocalizations(const Locale('en'));
+
   Widget buildTestableWidget(
     Widget child, {
     Locale locale = const Locale('en'),
@@ -80,8 +84,7 @@ void main() {
     );
     await tester.pump();
 
-    // The data line is localized with a {name} placeholder (English below).
-    expect(find.text('Data: Test'), findsOneWidget);
+    expect(find.text(en.{{L10N_DATA_KEY}}('Test')), findsOneWidget);
   });
 
   testWidgets('displays the localized failure and retries on failure', (
@@ -104,9 +107,9 @@ void main() {
     );
     await tester.pump();
 
-    // The category is localized (English), not a raw exception string.
+    // The category is localized, never a raw exception string.
     expect(
-      find.text('Network error. Please check your connection.'),
+      find.text(localizeFailure(en, const Failure.networkError())),
       findsOneWidget,
     );
 
