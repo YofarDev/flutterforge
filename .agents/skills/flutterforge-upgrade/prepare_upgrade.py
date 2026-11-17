@@ -360,13 +360,25 @@ def plan_upgrade(app: Path, package: str, base_tree: dict[str, bytes],
     return rows, writes, ratio
 
 
+MEANING = {
+    "CONFLICT": "app and template edited the same lines; written with markers",
+    "merge": "app and template both changed it; 3-way merged, review",
+    "take": "app copy is byte-identical to the original template file: NOT customized, safe to replace",
+    "add": "new template file in an area the app has; check it fits",
+    "delete": "template removed it; app copy never changed",
+    "keep": "left as is; review",
+    "skip": "not written",
+    "absent": "template changed it; the app removed or moved it; not written",
+}
+
+
 def print_plan(rows: list[tuple[str, str, str]]) -> None:
     order = ["CONFLICT", "merge", "take", "add", "delete", "keep", "skip", "absent"]
     for action in order:
         group = [(p, n) for a, p, n in rows if a == action]
         if not group:
             continue
-        print(f"{action} ({len(group)}):")
+        print(f"{action} ({len(group)}) - {MEANING[action]}:")
         if action in ("skip", "absent") and len(group) > 8:
             by_dir: dict[tuple[str, str], list[str]] = {}
             for p, n in group:
@@ -443,8 +455,9 @@ def main() -> int:
         print("dry run: nothing changed.")
         return 0
     if diverged and not args.apply_diverged:
-        print("Not applied: the app diverged from the template. Review the plan; port by hand, or")
-        print("rerun with --apply-diverged and resolve CONFLICT files keeping the app's conventions.")
+        print("Not applied: the app diverged from the template. --apply-diverged writes exactly")
+        print("the take/merge/CONFLICT/add/delete files listed above (nothing else); resolve the")
+        print("CONFLICT and merge files keeping the app's conventions. Or port the plan by hand.")
         return 3
 
     branch = f"flutterforge-upgrade-{head[:7]}"

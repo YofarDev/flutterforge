@@ -1853,7 +1853,7 @@ class TestUpgradePlan(unittest.TestCase):
         )
 
     def _section(self, stdout: str, action: str) -> str:
-        match = re.search(rf"^{action} \(\d+\):\n((?:  .*\n)*)", stdout, re.M)
+        match = re.search(rf"^{action} \(\d+\)[^\n]*:\n((?:  .*\n)*)", stdout, re.M)
         return match.group(1) if match else ""
 
     def test_plan_classifies_every_change_and_applies_only_safe_ones(self) -> None:

@@ -34,7 +34,7 @@ classifies every file the template changed against the app's copy:
 
 | Action | Meaning | On apply |
 | --- | --- | --- |
-| `take` | app still has the base version | replaced by the template's |
+| `take` | app copy is byte-identical to the original template file (not customized) | replaced by the template's |
 | `merge` | both changed it, edits don't overlap | 3-way merged |
 | `CONFLICT` | both changed the same lines | written with `<<<<<<< app` / `>>>>>>> template` markers |
 | `add` | new template file where the app has that area | created |
