@@ -1789,6 +1789,10 @@ class TestUpgradePlan(unittest.TestCase):
         "scripts/tool.sh": "echo v1\n",
         "scripts/feature_templates/x.tpl": "x v1\n",
         "test/core/a_test.dart": "import 'package:my_flutter_app/core/a.dart';\n",
+        "lib/core/helper.dart": "// helper\n",
+        "lib/core/helper_base.dart": "// base\n",
+        "lib/core/helper_mid.dart": "import 'helper_base.dart';\n",
+        "test/core/helper_test.dart": "import 'package:my_flutter_app/core/helper.dart';\nimport 'package:my_flutter_app/core/helper_mid.dart';\n",
     }
     HEAD_CHANGES = {
         "AGENTS.md": "line ONE\nline two\nline three\n",
@@ -1800,6 +1804,10 @@ class TestUpgradePlan(unittest.TestCase):
         "scripts/tool.sh": "echo v2\n",
         "scripts/feature_templates/x.tpl": "x v2\n",
         "test/core/new_test.dart": "import 'package:my_flutter_app/core/new.dart';\n",
+        "lib/core/helper.dart": None,
+        "lib/core/helper_base.dart": None,
+        "lib/core/helper_mid.dart": None,
+        "test/core/helper_test.dart": None,
     }
     IDENT = ["-c", "user.name=t", "-c", "user.email=t@t"]
 
@@ -1857,6 +1865,12 @@ class TestUpgradePlan(unittest.TestCase):
                 "scripts/feature_templates": None,      # app has no feature templates
                 "scripts/tool.sh": "echo custom\n",     # same line as the template change
                 "AGENTS.md": "line one\nline two\nline three\napp rule\n",
+                # Customized test the template deleted: kept, and so must be
+                # everything it imports (directly and through helper_mid).
+                "test/core/helper_test.dart": (
+                    "import 'package:demo_app/core/helper.dart';\n"
+                    "import 'package:demo_app/core/helper_mid.dart';\n// ours\n"
+                ),
             })
             result = self._run(tpl, app)
             self.assertEqual(result.returncode, 0, msg=fmt(result))
@@ -1871,6 +1885,12 @@ class TestUpgradePlan(unittest.TestCase):
             self.assertIn("lib/features/home/home_module.dart  (feature 'home' not in app)", skipped)
             self.assertIn("lib/core/needs.dart  (needs lib/core/missing.dart)", skipped)
             self.assertIn("scripts/feature_templates/x.tpl", self._section(out, "absent"))
+            kept = self._section(out, "keep")
+            self.assertIn("test/core/helper_test.dart", kept)
+            self.assertIn("lib/core/helper.dart  (template deleted it; still imported by test/core/helper_test.dart)", kept)
+            self.assertIn("lib/core/helper_base.dart  (template deleted it; still imported by lib/core/helper_mid.dart)", kept)
+            for still in ("helper.dart", "helper_mid.dart", "helper_base.dart"):
+                self.assertTrue((app / "lib/core" / still).exists(), still)
 
             self.assertEqual((app / "AGENTS.md").read_text(), "line ONE\nline two\nline three\napp rule\n")
             self.assertEqual((app / "lib/core/a.dart").read_text(), "// a v2\n")
@@ -1893,6 +1913,9 @@ class TestUpgradePlan(unittest.TestCase):
                 "AGENTS.md": "ours\n",
                 "lib/core/a.dart": "// ours\n",
                 "test/core/a_test.dart": "// ours\n",
+                "lib/core/gone.dart": "// ours\n",
+                "lib/core/helper_mid.dart": "// ours\n",
+                "test/core/helper_test.dart": "// ours\n",
             })
             before = tree_snapshot(app)
             result = self._run(tpl, app)

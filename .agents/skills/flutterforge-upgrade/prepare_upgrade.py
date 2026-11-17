@@ -313,6 +313,31 @@ def plan_upgrade(app: Path, package: str, base_tree: dict[str, bytes],
             rows.append(("CONFLICT" if conflict else "merge", path, ""))
             writes[path] = merged
 
+    # Never delete a file that something staying in the app still imports
+    # (e.g. a support file of a test the app customized and keeps).
+    def importer_of(target: str) -> str | None:
+        for folder in ("lib", "test"):
+            for file in (app / folder).rglob("*.dart") if (app / folder).is_dir() else []:
+                rel = str(file.relative_to(app))
+                if rel == target or writes.get(rel, b"") is None:
+                    continue
+                # Conservative: the app's current copy or the planned new one.
+                for content in (file.read_bytes(), writes.get(rel) or b""):
+                    if target in local_deps(rel, content, package):
+                        return rel
+        return None
+
+    kept_one = True
+    while kept_one:  # cancelling one delete can make another file needed
+        kept_one = False
+        for path in [p for p, data in writes.items() if data is None]:
+            user = importer_of(path)
+            if user:
+                del writes[path]
+                rows = [(("keep", p, f"template deleted it; still imported by {user}")
+                         if p == path else (act, p, note)) for act, p, note in rows]
+                kept_one = True
+
     # A new/updated Dart file must not import something this app will not have.
     def exists_after(target: str) -> bool:
         if target in writes:
@@ -331,6 +356,7 @@ def plan_upgrade(app: Path, package: str, base_tree: dict[str, bytes],
                 rows = [(("skip", p, f"needs {missing[0]}") if p == path else (act, p, note))
                         for act, p, note in rows]
                 changed = True
+
     return rows, writes, ratio
 
 
