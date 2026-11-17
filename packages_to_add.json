@@ -16,7 +16,7 @@
         "build_runner:^2.16.0",
         "freezed:^4.0.0",
         "json_serializable:^6.0.0",
-        "analyzer:^13.0.0",
+        "analyzer:^14.0.0",
         "path:^1.8.0"
     ]
 }

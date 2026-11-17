@@ -74,7 +74,7 @@ the current-stable lane), update this table, and let the smoke suite regenerate.
 | Package            | Spec                    | Resolved when established |
 | ------------------ | ----------------------- | ------------------------- |
 | flutter_bloc       | `^9.0.0`                | 9.1.1                     |
-| go_router          | `^18.0.0`               | 18.0.2                    |
+| go_router          | `^18.0.0`               | 18.1.4                    |
 | freezed_annotation | `^3.0.0`                | 3.1.0                     |
 | json_annotation    | `^4.12.0`               | 4.12.0                    |
 | get_it             | `^9.0.0`                | 9.3.0                     |
@@ -84,10 +84,10 @@ the current-stable lane), update this table, and let the smoke suite regenerate.
 | flutter_lints      | `^6.0.0` (dev)          | 6.0.0                     |
 | bloc_test          | `^10.0.0` (dev)         | 10.0.0                    |
 | mocktail           | `^1.0.4` (dev)          | 1.0.5                     |
-| build_runner       | `^2.16.0` (dev)         | 2.16.1                    |
-| freezed            | `^4.0.0` (dev)          | 4.0.1                     |
-| json_serializable  | `^6.0.0` (dev)          | 6.14.1                    |
-| analyzer           | `^13.0.0` (dev)         | 13.3.0                    |
+| build_runner       | `^2.16.0` (dev)         | 2.17.1                    |
+| freezed            | `^4.0.0` (dev)          | 4.0.3                     |
+| json_serializable  | `^6.0.0` (dev)          | 6.15.2                    |
+| analyzer           | `^14.0.0` (dev)         | 14.7.0                    |
 | path               | `^1.8.0` (dev)          | 1.9.1                     |
 | intl               | `any` (added by the generator, alongside `flutter_localizations` from the Flutter SDK) | — |
 
