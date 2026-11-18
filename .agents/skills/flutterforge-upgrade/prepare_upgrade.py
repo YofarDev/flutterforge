@@ -455,7 +455,9 @@ def main() -> int:
     package = match.group(1)
     if git(app, "rev-parse", "--is-inside-work-tree", check=False).strip() != "true":
         sys.exit("error: the app must be a git repository (commit it first)")
-    if not args.dry_run and git(app, "status", "--porcelain").strip():
+    # Untracked files (audit reports, notes) never block: the upgrade only
+    # writes the paths it plans, and refuses below if one of them is untracked.
+    if not args.dry_run and git(app, "status", "--porcelain", "--untracked-files=no").strip():
         sys.exit("error: the app has uncommitted changes; commit or stash them first")
     if git(template, "status", "--porcelain", "--untracked-files=no").strip():
         print("warning: the template has uncommitted changes; only committed state is used")
@@ -510,6 +512,12 @@ def main() -> int:
         print("the take/merge/CONFLICT/add/delete files listed above (nothing else); resolve the")
         print("CONFLICT and merge files keeping the app's conventions. Or port the plan by hand.")
         return 3
+
+    untracked = set(git(app, "ls-files", "--others", "--exclude-standard").splitlines())
+    clobbered = sorted(path for path in writes if path in untracked)
+    if clobbered:
+        sys.exit("error: the upgrade would overwrite untracked files; move or commit them first:\n  "
+                 + "\n  ".join(clobbered))
 
     branch = f"flutterforge-upgrade-{head[:7]}"
     git(app, "switch", "-c", branch)

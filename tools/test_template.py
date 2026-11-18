@@ -2742,6 +2742,16 @@ class TestUpgradeHelper(unittest.TestCase):
             stamp = json.loads((app / ".flutterforge.json").read_text())
             self.assertEqual(stamp["templateCommit"], self.head)
 
+    def test_untracked_files_do_not_block_the_upgrade(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            app = self._make_app(Path(raw).resolve(), self.base)
+            notes = app / "ux-audit" / "report.md"
+            notes.parent.mkdir()
+            notes.write_text("# audit\n")
+            result = self._upgrade(app, "--base", self.base)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual(notes.read_text(), "# audit\n")
+
     def test_reference_tree_without_counter_builds_at_head(self) -> None:
         """Apps that removed the Counter demo: the helper replays
         remove_counter.sh in a reference tree that is not a Flutter app."""
