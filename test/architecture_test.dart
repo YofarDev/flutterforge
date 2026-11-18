@@ -20,7 +20,9 @@ import 'support/architecture_checker.dart';
 ///    Every `lib/` file outside `lib/features/` (`lib/shared/`, ...) is core.
 ///    Every file under `lib/features/<f>/` is its barrel, its module, or in
 ///    `data/`/`domain/`/`presentation/`; modules are imported only by
-///    `service_locator.dart` and `app_router.dart`.
+///    `service_locator.dart` and `app_router.dart`. App-wide state lives in
+///    `lib/app_state/`: it reads feature barrels only, and only presentation,
+///    app state and the composition roots may import it.
 /// 6. No production component stores a Cubit/Bloc dependency (nullable, late,
 ///    mutable, aliased, generic, inherited, record, factory and freezed
 ///    fields included); a Widget or its State may keep a cubit it receives.

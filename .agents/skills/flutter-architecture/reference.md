@@ -340,6 +340,7 @@ Signs a file does **not** need splitting:
 - acyclic feature dependencies (`feature-dependency-cycle`), including public-barrel and conditional import/export edges
 - `core/` never imports feature internals — and every `lib/` file outside `lib/features/` (e.g. `lib/shared/`, `lib/utils/`) is core for this rule, so a differently named folder cannot launder a dependency
 - every handwritten file under `lib/features/<f>/` is the barrel `<f>.dart`, the module `<f>_module.dart`, or inside `data/`, `domain/` or `presentation/` (`unclassified-location`); anything else would have no layer rules
+- app-wide state lives in `lib/app_state/`: it reads features through their public barrels only (`app-state-imports-internals`), and only presentation code, other app state and the composition roots may import it (`app-state-access`)
 - feature modules are imported only by `service_locator.dart` and `app_router.dart` (`module-import`), so nothing else can reach a module's locator
 - no cubit/bloc stored as a field outside widgets (type-based: `Cubit`/`Bloc`/`BlocBase`/`StateStreamable`, records, cubit factories, extension types and `@freezed` factory parameters included); a `Widget` or its `State` may keep a cubit it receives through its constructor
 - a `part` file lives in the same feature and layer as its library (`part-location`); `file:` URIs are checker errors

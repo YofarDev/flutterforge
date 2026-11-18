@@ -48,6 +48,12 @@ lib/
 its own feature/module with a barrel. Extract a package only when it has a
 stable API or is reused across apps.
 
+App-wide state used by several features (a wallet, session or progress cubit
+read by many screens) lives in `lib/app_state/`: it may import `core/` and
+feature public barrels only, is provided from `app.dart`, and only presentation
+code, other app state and the composition roots may import it (never domain,
+data or core). A cubit used by one feature stays in that feature.
+
 ## Wiring
 
 - **Registration** happens only in `service_locator.dart` (app-wide

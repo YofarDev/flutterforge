@@ -99,6 +99,22 @@ const List<String> featureModuleImportAllowlist = <String>[
   'lib/core/router/app_router.dart',
 ];
 
+/// App-wide state shared by several features (e.g. a wallet or session cubit
+/// used by many screens). It sits above the features: it may import `core/`
+/// and feature PUBLIC barrels (domain contracts) only, and only presentation
+/// code, other app-state files and the composition roots may import it —
+/// never domain, data or core.
+const String appStatePrefix = 'lib/app_state/';
+
+/// Non-presentation files that may import app state: the composition roots
+/// that construct and provide it.
+const List<String> appStateImportAllowlist = <String>[
+  'lib/app.dart',
+  'lib/main.dart',
+  'lib/core/di/service_locator.dart',
+  'lib/core/router/app_router.dart',
+];
+
 /// Files that may use get_it directly: the [locatorAllowlist] plus feature
 /// modules.
 bool _mayUseLocator(String appRelativePath) =>
@@ -652,6 +668,43 @@ class _AnalyzerRun {
               'features receive dependencies through constructors',
         ),
       );
+    }
+
+    // Rule: app state (lib/app_state/) sits above the features. It reads
+    // features through their public barrels only, and only presentation code,
+    // other app state and the composition roots may depend on it.
+    if (target.isAppState &&
+        !importer.isAppState &&
+        importer.layer != _Layer.presentation &&
+        !isFeatureModule(importer.path) &&
+        !appStateImportAllowlist.contains(importer.path)) {
+      violations.add(
+        ArchitectureViolation(
+          ruleId: 'app-state-access',
+          path: importer.path,
+          line: line,
+          explanation:
+              'imports app state ${_relative(targetPath)} — only presentation '
+              'code, lib/app_state/ and the composition roots may depend on '
+              'app-wide state; domain, data and core never do',
+        ),
+      );
+    }
+    if (importer.isAppState && target.feature != null) {
+      final String publicBarrel =
+          'lib/features/${target.feature}/${target.feature}.dart';
+      if (_relative(targetPath) != publicBarrel) {
+        violations.add(
+          ArchitectureViolation(
+            ruleId: 'app-state-imports-internals',
+            path: importer.path,
+            line: line,
+            explanation:
+                'app state imports ${_relative(targetPath)} — it may read a '
+                'feature only through its public barrel $publicBarrel',
+          ),
+        );
+      }
     }
 
     // Rule: feature modules are imported only by the app-wide composition
@@ -1374,6 +1427,7 @@ final class _FileClassification {
     required this.feature,
     required this.isPublicBarrel,
     required this.isCoreLike,
+    this.isAppState = false,
   });
 
   /// App-relative normalized path (`lib/...`).
@@ -1388,6 +1442,10 @@ final class _FileClassification {
   /// root-level `lib/*.dart` and any other folder such as `lib/shared/` —
   /// excluding `lib/app.dart`, `lib/main.dart` and the DI composition root.
   final bool isCoreLike;
+
+  /// True for app-wide state under [appStatePrefix] (not core: it may read
+  /// feature barrels).
+  final bool isAppState;
 
   /// Domain files and public barrels share the purity rules.
   bool get isDomainLike =>
@@ -1420,9 +1478,13 @@ _FileClassification _classifyFile(String appRelativePath) {
   // Everything in lib/ outside lib/features/ is infrastructure: lib/core/,
   // root-level files and any other folder (lib/shared/, lib/utils/, ...), so
   // a differently named folder cannot escape the core rules.
+  // App state (lib/app_state/) is the one folder outside features that is not
+  // core: it may read feature barrels (see [appStatePrefix]).
+  final bool isAppState = path.startsWith(appStatePrefix);
   final bool isCoreLike =
       path.startsWith('lib/') &&
       !path.startsWith('lib/features/') &&
+      !isAppState &&
       path != 'lib/app.dart' &&
       path != 'lib/main.dart' &&
       path != serviceLocatorPath;
@@ -1433,6 +1495,7 @@ _FileClassification _classifyFile(String appRelativePath) {
     feature: feature,
     isPublicBarrel: isBarrel,
     isCoreLike: isCoreLike,
+    isAppState: isAppState,
   );
 }
 

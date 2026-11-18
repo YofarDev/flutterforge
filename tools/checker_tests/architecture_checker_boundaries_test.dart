@@ -665,4 +665,79 @@ String shout(String value) => value.toUpperCase();
       );
     });
   });
+
+  group('app state (lib/app_state/)', () {
+    /// App-wide state reading the alpha feature through its public barrel.
+    const String walletState = '''
+import '../features/alpha/alpha.dart';
+
+class WalletState {
+  const WalletState(this.model);
+  final AlphaModel model;
+}
+''';
+
+    test('accepted: app state reads a barrel; presentation and app.dart '
+        'consume it', () async {
+      await expectClean(
+        fixtureWith(<String, String>{
+          'lib/app_state/wallet_state.dart': walletState,
+          'lib/features/beta/presentation/wallet_badge.dart': '''
+import '../../../app_state/wallet_state.dart';
+
+String badge(WalletState state) => state.model.id;
+''',
+          'lib/app.dart': withImport(
+            fixtureApp['lib/app.dart']!,
+            "import 'app_state/wallet_state.dart';",
+          ),
+        }),
+        'app state over a barrel, consumed by presentation and app.dart',
+      );
+    });
+
+    test('rejected: app state importing feature internals', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/app_state/wallet_state.dart': '''
+import '../features/alpha/data/datasources/alpha_remote_datasource.dart';
+
+Object source() => AlphaRemoteDataSource();
+''',
+        }),
+        'app-state-imports-internals',
+        'app state reaching into alpha/data',
+      );
+    });
+
+    test('rejected: domain depending on app state', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/app_state/wallet_state.dart': walletState,
+          'lib/features/beta/domain/models/uses_wallet.dart': '''
+import '../../../../app_state/wallet_state.dart';
+
+String id(WalletState state) => state.model.id;
+''',
+        }),
+        'app-state-access',
+        'beta domain importing app state',
+      );
+    });
+
+    test('rejected: core depending on app state', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/app_state/wallet_state.dart': walletState,
+          'lib/core/wallet_format.dart': '''
+import '../app_state/wallet_state.dart';
+
+String format(WalletState state) => state.model.id;
+''',
+        }),
+        'app-state-access',
+        'core importing app state',
+      );
+    });
+  });
 }
