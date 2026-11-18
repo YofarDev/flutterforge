@@ -196,43 +196,11 @@ void main() {
 }
 ```
 
-### Screen Integration Test
+### Navigation and wiring
 
-```dart
-class MockGoRouter extends Mock implements GoRouter {}
-class MockAuthCubit extends MockCubit<AuthState> implements AuthCubit {}
-
-void main() {
-  testWidgets('navigates to home after successful login', (tester) async {
-    final mockCubit = MockAuthCubit();
-    final mockRouter = MockGoRouter();
-
-    when(() => mockCubit.state).thenReturn(const AuthState.initial());
-    whenListen(
-      mockCubit,
-      Stream.fromIterable([
-        const AuthState.loading(),
-        AuthState.authenticated(fakeUser),
-      ]),
-      initialState: const AuthState.initial(),
-    );
-
-    await tester.pumpWidget(
-      InheritedGoRouter(
-        goRouter: mockRouter,
-        child: BlocProvider<AuthCubit>.value(
-          value: mockCubit,
-          child: const MaterialApp(home: LoginScreen()),
-        ),
-      ),
-    );
-
-    await tester.pumpAndSettle();
-
-    verify(() => mockRouter.go('/')).called(1);
-  });
-}
-```
+Do not mock `GoRouter` or `pumpAndSettle` to verify navigation. Use the feature's
+flow test (`test/features/<f>/<f>_flow_test.dart`): real module registrations on
+`GetIt.asNewInstance()`, real route, fake data source only. See `test/README.md`.
 
 ### Golden Test
 

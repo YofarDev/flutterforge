@@ -5,10 +5,14 @@ set -e
 FLUTTERFORGE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "Pulling latest flutterforge..."
-PULL_OUTPUT=$(git -C "$FLUTTERFORGE_ROOT" pull)
-echo "$PULL_OUTPUT"
-
-if echo "$PULL_OUTPUT" | grep -q "Already up to date."; then
+# Compare HEAD before/after instead of parsing git's (localized) message, and
+# never fail the hook when offline: a failed pull just skips the sync.
+BEFORE="$(git -C "$FLUTTERFORGE_ROOT" rev-parse HEAD)"
+if ! git -C "$FLUTTERFORGE_ROOT" pull; then
+  echo "git pull failed (offline?) — skipping skill sync."
+  exit 0
+fi
+if [ "$(git -C "$FLUTTERFORGE_ROOT" rev-parse HEAD)" = "$BEFORE" ]; then
   echo "No changes pulled, skipping skill sync."
   exit 0
 fi

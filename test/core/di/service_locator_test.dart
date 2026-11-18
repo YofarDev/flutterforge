@@ -14,8 +14,8 @@ import 'package:my_flutter_app/features/home/presentation/bloc/home_cubit.dart';
 /// (feature modules included). `fgen` adds a line per generated feature at
 /// the marker; add one for every hand-written registration.
 void main() {
-  tearDown(() {
-    getIt.reset();
+  tearDown(() async {
+    await getIt.reset();
   });
 
   test('registers and resolves every dependency', () async {
@@ -29,6 +29,8 @@ void main() {
     // fgen:resolve
   });
 
+  // A lifetime contract, not plumbing: a singleton cubit would be reused
+  // (already closed) after its route was popped.
   test('cubits resolve as factories (fresh instances per request)', () async {
     await setupServiceLocator();
 

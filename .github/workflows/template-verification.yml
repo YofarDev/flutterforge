@@ -101,7 +101,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: smoke-artifacts-${{ matrix.os }}-${{ matrix.flutter-version || 'stable' }}
+          # `with:` inputs are not shell-expanded: $RUNNER_TEMP would stay literal.
           path: |
-            $RUNNER_TEMP/smoke-artifacts
+            ${{ runner.temp }}/smoke-artifacts
           if-no-files-found: warn
           retention-days: 14

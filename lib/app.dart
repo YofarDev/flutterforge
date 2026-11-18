@@ -40,10 +40,11 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.dark,
+      themeMode: ThemeMode.system,
       routerConfig: _effectiveRouter,
       localizationsDelegates: appLocalizationsDelegates,
-      supportedLocales: const <Locale>[Locale('en'), Locale('fr')],
+      // Every ARB in lib/core/l10n: a new language needs no code change.
+      supportedLocales: AppLocalizations.supportedLocales,
       // No forced `locale:`: the app follows the device locale.
     );
   }

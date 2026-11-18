@@ -29,4 +29,8 @@ class CounterService {
   int applyStepSize(int value, CounterSettings settings) {
     return value + settings.stepSize;
   }
+
+  int applyStepSizeDown(int value, CounterSettings settings) {
+    return value - settings.stepSize;
+  }
 }

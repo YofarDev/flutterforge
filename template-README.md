@@ -73,7 +73,8 @@ and `remove_counter.sh` also require [uv](https://docs.astral.sh/uv/).
 
 | Script | Purpose |
 |--------|---------|
-| `./scripts/fverify.sh [--fix]` | **Quality Gate**: `dart format` check, then `flutter analyze` + `flutter test` (failures-only reporter; pass `--reporter expanded` for full output). Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format .`. A format failure still runs analysis and tests so everything is reported in one pass. Run `--fix` before finishing any change. |
+| `./scripts/ftest.sh [paths] [--slowest[=N]] [flutter test args]` | Run tests (use it instead of a bare `flutter test`). Waits for a slot in a machine-wide queue shared by every project (lock in `~/.cache/flutterforge/test-queue`; runs scoped to paths use a separate light lane, so a one-file check never waits behind another project's full suite; a slot is reclaimed only when its holder and its `flutter test` are both gone), runs niced, and prints each compile error once without tool stack frames. A full run (no paths) imports the test files into `FORGE_TEST_SHARDS` generated entrypoints (default 4, balanced by file size; `.dart_tool/flutterforge/shard_<n>_test.dart`) that run in parallel: one compile and one isolate per shard instead of per file — 2–4× faster on small suites, ~30% on a 260-file one; golden tests and files with library-level `@TestOn`/`@Tags`/`@Timeout`/`@Skip` run in their own isolate. It also skips `test/architecture_test.dart` when `lib/`, `pubspec.lock` and the checker are unchanged since its last green run (always on CI, or `FORGE_ARCH_ALWAYS=1`). `--slowest[=N]` (default 10) runs one isolate per file and prints the slowest files and tests (needs `uv`). Environment: `FORGE_QUEUE=0`, `FORGE_QUEUE_SLOTS` / `FORGE_QUEUE_LIGHT_SLOTS` (default 1), `FORGE_NICE` (default 10), `FORGE_TEST_CONCURRENCY` (default 4 full, 2 scoped), `FORGE_TEST_SHARDS`, `FORGE_TEST_AGGREGATE=0` (one isolate per file). |
+| `./scripts/fverify.sh [--fix]` | **Quality Gate**: `dart format` check, then `flutter analyze` + `flutter test` (failures-only reporter; pass `--reporter expanded` for full output). Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format` on the Dart source dirs (`lib`, `test`, `bin`, `tool`, `integration_test` — never `build/`). A format failure still runs analysis and tests so everything is reported in one pass. Run `--fix` before finishing any change. |
 | `./scripts/fgen.sh "name" [--with-service] [--with-dto]` | **Generate New Feature**: Creates Clean Architecture boilerplate (lean by default; optional layers via flags) and runs code generation. Refuses to overwrite an existing feature; snake_case or camelCase names. |
 | `./scripts/fstr.sh "key" "FR" "EN" [...more triples] [project_path]` | **Add Localization**: Adds one or more keys to both French and English `.arb` files in one validated pass, then regenerates localization once. Requires a new lowerCamelCase key, valid ARB JSON, and matching placeholders. Defaults to the current project. |
 | `./scripts/fl10n.sh` | **Find Unlocalized Strings**: Scans `lib/` for hardcoded user-facing strings that should use `AppLocalizations`. |
@@ -82,7 +83,7 @@ and `remove_counter.sh` also require [uv](https://docs.astral.sh/uv/).
 | `./scripts/fdead.sh` | **Potentially Unreferenced Files** (advisory only): reports files whose basename appears in no import/export/part statement. Never deletes anything — the textual scan cannot prove deletion is safe (conditional directives, custom entry points, and filename collisions can affect findings), so review every finding manually. |
 | `./scripts/fimp.sh` / `./scripts/fimp.sh --apply` | **Fix Imports** (preview-first): with no flags, displays proposed repairs and writes nothing; `--apply` repairs unambiguous broken imports, then re-runs analysis and reports failure without rollback. Never repairs a `lib/` import into `test/`, and never gives a test helper a `package:` URI. |
 | `./scripts/fcheck.sh [package_name]` | **Dependency Inventory** (review aid): compares dependencies with direct imports, or lists imports of one package. Results do not establish that a dependency is removable; inspect exports, indirect usage, code generation, assets and platform channels. |
-| `./scripts/sync_skills.sh [--check] [--user]` | **Sync Skills**: Copies canonical top-level Markdown files from `.agents/skills` into matching skill directories in existing `.codex/skills/` targets. Missing target/skill directories are skipped and extras are retained. `--check` writes nothing and exits nonzero on drift. `--user` also targets existing `~/.agents/skills/` and `~/.claude/skills/` copies; use when user-level synchronization is requested. |
+| `./scripts/sync_skills.sh [--check] [--user]` | **Sync Skills**: Copies every file of each canonical skill in `.agents/skills` (Markdown, helper scripts, permission bits) into matching skill directories in existing `.codex/skills/` targets. A target skill directory that is a symlink into another checkout's canonical `.agents/skills/` is never written. Missing target/skill directories are skipped and extras are retained. `--check` writes nothing and exits nonzero on drift. `--user` also targets existing `~/.agents/skills/` and `~/.claude/skills/` copies; use when user-level synchronization is requested. |
 | `./remove_counter.sh` | **Remove Counter Demo**: Deletes the Counter feature and rewrites its demo wiring/tests. For freshly generated apps with the untouched example; see [Removing Example Code](#removing-example-code). |
 
 The read-only scans (`fmap`, `fl10n`, `fdead`, `fcheck`, import preview, and skill drift
@@ -106,8 +107,9 @@ flutter gen-l10n
 # Run code generation (Freezed/JSON)
 dart run build_runner build --delete-conflicting-outputs
 
-# Run tests
-flutter test
+# Run tests (queued machine-wide; pass paths to run only the affected area)
+./scripts/ftest.sh
+./scripts/ftest.sh test/features/<feature>/
 
 # Run the app
 flutter run
@@ -185,16 +187,19 @@ Generation contract:
   fallback project name.
 - Feature names are normalized to snake_case and validated as Dart identifiers:
   empty values, path separators, `..`, punctuation, invalid starting
-  characters and Dart reserved identifiers are rejected, and nothing is
-  written for an invalid name.
+  characters, leading/trailing/doubled underscores and Dart reserved
+  identifiers are rejected, and nothing is written for an invalid name. A name
+  whose generated classes would clash with a type the feature imports (e.g.
+  `image`, `page`, `form`, `failure`, `string`) is refused the same way.
 - It refuses to run if the feature's `lib/features/<name>` or
   `test/features/<name>` directory already exists (symlinks included) — an
   existing feature is never partially overwritten.
 - Files are rendered into a temporary directory and published only after
   validation. Screen localization keys are then added via `scripts/fstr.sh`
   (with a key-collision check); if that or `build_runner` fails, the published
-  feature is kept, the incomplete state is reported, and the script exits
-  non-zero.
+  (and already wired) feature is kept, the incomplete state is reported, and
+  the script exits non-zero. Finally the new feature and the wired files are
+  analyzed; analyzer errors make it exit non-zero instead of reporting success.
 
 `fgen` wires the feature itself: it generates `lib/features/<name>/<name>_module.dart`
 (the feature's registrations and routes) and inserts it at the `// fgen:` markers

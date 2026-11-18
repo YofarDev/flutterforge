@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -12,32 +13,35 @@ class AppRouter {
 
   /// One router per app instance (never a static: tests need their own,
   /// disposable router). Each feature contributes its routes through its
-  /// module; `fgen` adds new ones at the marker.
-  static GoRouter createRouter() => GoRouter(
-    debugLogDiagnostics: true,
-    routes: <RouteBase>[
-      ...homeRoutes(getIt),
-      ...counterRoutes(getIt),
-      // fgen:routes
-    ],
-    errorBuilder: (BuildContext context, GoRouterState state) {
-      final AppLocalizations l10n = AppLocalizations.of(context);
-      return Scaffold(
-        appBar: AppBar(title: Text(l10n.errorTitle)),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Text(l10n.pageNotFound),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => context.go(Routes.home),
-                child: Text(l10n.goHome),
+  /// module; `fgen` adds new ones at the marker. [initialLocation] lets tests
+  /// start on a deep link.
+  static GoRouter createRouter({String initialLocation = Routes.home}) =>
+      GoRouter(
+        initialLocation: initialLocation,
+        debugLogDiagnostics: kDebugMode,
+        routes: <RouteBase>[
+          ...homeRoutes(getIt),
+          ...counterRoutes(getIt),
+          // fgen:routes
+        ],
+        errorBuilder: (BuildContext context, GoRouterState state) {
+          final AppLocalizations l10n = AppLocalizations.of(context);
+          return Scaffold(
+            appBar: AppBar(title: Text(l10n.errorTitle)),
+            body: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Text(l10n.pageNotFound),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () => context.go(Routes.home),
+                    child: Text(l10n.goHome),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       );
-    },
-  );
 }

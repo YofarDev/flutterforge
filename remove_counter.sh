@@ -25,7 +25,7 @@ echo "   ✓ Feature folders deleted"
 
 # 2. Update every referencing file
 export PROJECT_ROOT="$(pwd)"
-uv run python - <<'EOF'
+uv run --no-project python - <<'EOF'
 import os
 import re
 
@@ -38,6 +38,24 @@ def read(rel):
 def write(rel, content):
     with open(os.path.join(root, rel), 'w', encoding='utf-8') as f:
         f.write(content)
+
+# Exact demo identifiers only (word-bounded), so user features such as
+# `step_counter` / `StepCounter` / `stepCounterRoutes` are never touched.
+DEMO_IMPORT = re.compile(r"^\s*(import|export)\s+['\"][^'\"]*features/counter/")
+DEMO_TOKEN = re.compile(
+    r"\b(?:registerCounterFeature|counterRoutes|counterLocalDataSourceOverride"
+    r"|ICounterRepository|ICounterLocalDataSource|CounterCubit|CounterService"
+    r"|CounterRepository|CounterLocalDataSource|counterCubit\w*)\b"
+)
+# Demo-only test files: any identifier or word that *starts* with counter.
+BROAD_DEMO = re.compile(
+    r"(?<![A-Za-z0-9_])(?:I|Fake|Failing)?[Cc]ounter|fake_counter_data_source"
+)
+
+def drop_lines(content, *patterns):
+    """Drop every line matched by any pattern (regex objects)."""
+    kept = [ln for ln in content.split('\n') if not any(p.search(ln) for p in patterns)]
+    return '\n'.join(kept)
 
 def remove_block(content, opener, marker):
     """Remove the balanced-parenthesis block starting at each `opener`
@@ -73,12 +91,9 @@ def remove_block(content, opener, marker):
 rel = 'lib/core/di/service_locator.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
-    content = re.sub(r"import .*counter[^\n]*\n", '', content, flags=re.I)
     content = remove_block(content, 'registerCounterFeature(', 'Counter')
     # The setupServiceLocator override parameter goes too.
-    content = ''.join(
-        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
-    )
+    content = drop_lines(content, DEMO_IMPORT, DEMO_TOKEN)
     write(rel, content)
     print('   ✓ DI registration removed')
 
@@ -94,8 +109,8 @@ if os.path.exists(os.path.join(root, rel)):
 rel = 'lib/core/router/app_router.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
-    content = re.sub(r"import .*counter[^\n]*\n", '', content, flags=re.I)
     content = re.sub(r" *\.\.\.counterRoutes\(\w*\),\n", '', content)
+    content = drop_lines(content, DEMO_IMPORT, DEMO_TOKEN)
     write(rel, content)
     print('   ✓ Router updated')
 
@@ -128,9 +143,7 @@ if os.path.exists(os.path.join(root, rel)):
         content,
         flags=re.S,
     )
-    content = ''.join(
-        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
-    )
+    content = drop_lines(content, DEMO_IMPORT, BROAD_DEMO)
     write(rel, content)
     print('   ✓ Integration tests cleaned up')
 
@@ -138,9 +151,7 @@ if os.path.exists(os.path.join(root, rel)):
 rel = 'test/core/di/service_locator_test.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
-    content = ''.join(
-        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
-    )
+    content = drop_lines(content, DEMO_IMPORT, DEMO_TOKEN)
     write(rel, content)
     print('   ✓ DI smoke test cleaned up')
 
@@ -155,7 +166,7 @@ rel = 'test/features/home/home_flow_test.dart'
 if os.path.exists(os.path.join(root, rel)):
     content = read(rel)
 
-    def remove_all_blocks(content, opener, marker):
+    def remove_all_blocks_re(content, opener, marker):
         """Removes EVERY balanced-parenthesis block opened by `opener` whose
         body contains `marker` (plus its trailing comma)."""
         while True:
@@ -177,7 +188,7 @@ if os.path.exists(os.path.join(root, rel)):
                             break
                     j += 1
                 block = content[start:j + 1]
-                if marker in block:
+                if marker.search(block):
                     begin = content.rfind('\n', 0, start) + 1
                     end = j + 1
                     # Consume the statement/collection terminator (';' or
@@ -195,7 +206,7 @@ if os.path.exists(os.path.join(root, rel)):
                 return content
 
     # Drop every counter-specific testWidgets block as a whole.
-    content = remove_all_blocks(content, 'testWidgets(', 'ounter')
+    content = remove_all_blocks_re(content, 'testWidgets(', BROAD_DEMO)
     # configureApp loses its counter override parameter...
     content = content.replace(
         'Future<void> configureApp({ICounterLocalDataSource? counterOverride}) async {',
@@ -203,11 +214,61 @@ if os.path.exists(os.path.join(root, rel)):
     )
     # ...then any remaining line mentioning the counter (imports, fields,
     # assignment lines, doc-comment lines).
-    content = ''.join(
-        line + '\n' for line in content.split('\n')[:-1] if 'ounter' not in line
-    )
+    content = drop_lines(content, DEMO_IMPORT, BROAD_DEMO)
     write(rel, content)
     print('   ✓ Home flow tests cleaned up')
+
+# --- ARB files: demo localization keys nothing references any more --------
+import json
+
+DEMO_KEYS = [
+    'counterTitle', 'counterDescription', 'counterIncrement', 'counterDecrement',
+    'tryCounterDemo', 'counterDemoDescription', 'reset', 'count',
+]
+arb_dir = os.path.join(root, 'lib', 'core', 'l10n')
+arb_paths = [
+    os.path.join(arb_dir, name)
+    for name in ('app_localizations_fr.arb', 'app_localizations_en.arb')
+    if os.path.isfile(os.path.join(arb_dir, name))
+]
+if arb_paths:
+    corpus = []
+    for top in ('lib', 'test'):
+        for base, dirs, names in os.walk(os.path.join(root, top)):
+            if os.path.abspath(base).startswith(os.path.abspath(arb_dir)):
+                continue  # generated AppLocalizations always mentions every key
+            for name in names:
+                if name.endswith('.dart'):
+                    try:
+                        with open(os.path.join(base, name), encoding='utf-8') as f:
+                            corpus.append(f.read())
+                    except OSError:
+                        pass
+    text = '\n'.join(corpus)
+    removable = [k for k in DEMO_KEYS if not re.search(r'\b' + re.escape(k) + r'\b', text)]
+    changed = []
+    for path in arb_paths:
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            print(f'   ⚠️  {os.path.basename(path)} is not valid JSON — demo keys left in place')
+            continue
+        if not isinstance(data, dict):
+            continue
+        gone = [k for k in removable if k in data or '@' + k in data]
+        if not gone:
+            continue
+        for k in gone:
+            data.pop(k, None)
+            data.pop('@' + k, None)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, allow_nan=False)
+            f.write('\n')
+        changed.append(path)
+    if changed:
+        open(os.path.join(root, '.forge_arb_changed'), 'w').close()
+        print('   ✓ Unused demo l10n keys removed: ' + ', '.join(removable))
 EOF
 
 # 3. Re-format the files edited above (surgical text edits are not
@@ -226,6 +287,21 @@ if command -v dart >/dev/null 2>&1; then
     echo "   ✓ Edited files re-formatted"
 else
     echo "   ⚠️  'dart' not found — run 'dart format .' before fverify."
+fi
+
+# 4. Regenerate localizations when ARB keys were removed.
+if [ -f .forge_arb_changed ]; then
+    rm -f .forge_arb_changed
+    if command -v flutter >/dev/null 2>&1; then
+        if flutter gen-l10n >/dev/null; then
+            echo "   ✓ Localizations regenerated"
+        else
+            echo "❌ 'flutter gen-l10n' failed — fix the ARB files, then run it again."
+            exit 1
+        fi
+    else
+        echo "   ⚠️  'flutter' not found — run 'flutter gen-l10n' before fverify."
+    fi
 fi
 
 echo "✅ Counter feature removal complete!"

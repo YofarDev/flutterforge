@@ -18,7 +18,7 @@ If the project ships architecture boundary tests (`test/architecture_test.dart`)
 their failures are pre-localized violations with file:line precision:
 
 ```bash
-flutter test test/architecture_test.dart
+./scripts/ftest.sh test/architecture_test.dart   # or: flutter test test/architecture_test.dart
 ```
 
 Then run `fanal` (in current folder) if available. It should summarize: file tree, feature map,

@@ -22,21 +22,38 @@ else
     SED_INPLACE=(-i '')
 fi
 
+# Set once the version is bumped: a failed build restores the original
+# pubspec.yaml so the build number is not consumed by a build that produced
+# nothing.
+PUBSPEC_BACKUP=""
+
 error_exit() {
     echo "Error: $1" >&2
+    if [ -n "$PUBSPEC_BACKUP" ] && [ -f "$PUBSPEC_BACKUP" ]; then
+        cp "$PUBSPEC_BACKUP" "$PUBSPEC_FILE" && echo "Restored $PUBSPEC_FILE (version bump undone)." >&2
+        rm -f "$PUBSPEC_BACKUP"
+    fi
     exit 1
 }
 
 # -- Flags --------------------------------------------------------------------
-BUILD_ANDROID=true
-BUILD_IOS=true
+# No flag: both platforms. --android / --ios select platforms (both flags:
+# both platforms).
+WANT_ANDROID=false
+WANT_IOS=false
 for arg in "$@"; do
     case $arg in
-        --android) BUILD_ANDROID=true; BUILD_IOS=false ;;
-        --ios)     BUILD_ANDROID=false; BUILD_IOS=true ;;
+        --android) WANT_ANDROID=true ;;
+        --ios)     WANT_IOS=true ;;
         *) error_exit "Unknown argument: $arg  (supported: --android, --ios)" ;;
     esac
 done
+if [ "$WANT_ANDROID" = false ] && [ "$WANT_IOS" = false ]; then
+    WANT_ANDROID=true
+    WANT_IOS=true
+fi
+BUILD_ANDROID=$WANT_ANDROID
+BUILD_IOS=$WANT_IOS
 
 DOWNLOADS_DIR="${FBUILD_OUT_DIR:-$HOME/Downloads}"
 mkdir -p "$DOWNLOADS_DIR"
@@ -61,6 +78,8 @@ NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))
 NEW_VERSION_LINE="version: $VERSION+$NEW_BUILD_NUMBER"
 
 echo "Bumping version: $VERSION+$BUILD_NUMBER -> $VERSION+$NEW_BUILD_NUMBER"
+PUBSPEC_BACKUP="$(mktemp)"
+cp "$PUBSPEC_FILE" "$PUBSPEC_BACKUP"
 sed "${SED_INPLACE[@]}" "s|^version: $VERSION+$BUILD_NUMBER\$|$NEW_VERSION_LINE|" "$PUBSPEC_FILE" \
     || error_exit "Failed to update $PUBSPEC_FILE."
 
@@ -98,4 +117,5 @@ if [ "$BUILD_IOS" = true ]; then
     collect_artifact "build/ios/ipa/" "*.ipa" ios ipa
 fi
 
+rm -f "$PUBSPEC_BACKUP"
 echo "Build script finished successfully."

@@ -334,21 +334,24 @@ Signs a file does **not** need splitting:
 `test/architecture_test.dart` uses an analyzer-based checker (`test/support/architecture_checker.dart`) that **fails closed** on resolution errors and enforces, on statically-visible imports and declarations:
 
 - dependencies flow inward (`presentation → domain ← data`)
-- domain purity (domain imports nothing from data/presentation)
+- domain purity (domain imports nothing from data/presentation, and no Flutter UI library, `dart:ui`, `flutter_bloc`/`bloc` or `go_router`)
 - domain purity through re-export chains: importing a local barrel that re-exports a forbidden dependency (a Flutter UI library, l10n, router, DI, theme, logger, or data/presentation internals) is forbidden too — even when a `show` clause narrows the symbols. Reached generated libraries and all conditional branches are traversed; generated declarations remain exempt from standalone rules. Scoped to app-local re-export chains ending in known forbidden targets; third-party package internals are not audited exhaustively.
 - cross-feature access via a feature's public barrel only (barrels re-export nothing internal)
 - acyclic feature dependencies (`feature-dependency-cycle`), including public-barrel and conditional import/export edges
-- `core/` never imports feature internals
-- no cubit/bloc stored as a field of another cubit/bloc/service (type-based)
-- `getIt` resolved only from the allowlist (`app.dart`, `service_locator.dart`, `app_router.dart`; `main.dart` may additionally *import* `service_locator.dart` for bootstrap)
+- `core/` never imports feature internals — and every `lib/` file outside `lib/features/` (e.g. `lib/shared/`, `lib/utils/`) is core for this rule, so a differently named folder cannot launder a dependency
+- every handwritten file under `lib/features/<f>/` is the barrel `<f>.dart`, the module `<f>_module.dart`, or inside `data/`, `domain/` or `presentation/` (`unclassified-location`); anything else would have no layer rules
+- feature modules are imported only by `service_locator.dart` and `app_router.dart` (`module-import`), so nothing else can reach a module's locator
+- no cubit/bloc stored as a field outside widgets (type-based: `Cubit`/`Bloc`/`BlocBase`/`StateStreamable`, records, cubit factories, extension types and `@freezed` factory parameters included); a `Widget` or its `State` may keep a cubit it receives through its constructor
+- a `part` file lives in the same feature and layer as its library (`part-location`); `file:` URIs are checker errors
+- `getIt` resolved only from the allowlist (`app.dart`, `service_locator.dart`, `app_router.dart`, feature modules; `main.dart` may additionally *import* `service_locator.dart` for bootstrap)
 - registrations (`register*`) appear only in `service_locator.dart` and feature modules (`lib/features/<f>/<f>_module.dart`, which may also import get_it)
 
 **Scope limits (honest):** the checker sees only statically resolvable imports and declarations — dynamic coupling (e.g. a service receiving a cubit through an interface), naming quality, cubit sizing, listener nesting, rebuild scope, and singleton-vs-factory judgment are **review guidance**, not executable rules. A green suite proves the enforced rules only; it is not proof that "all architecture rules" hold. Negative fixtures (code that *should* fail the checker) are part of the contract — when you extend the checker with a rule from this skill, add the negative test alongside the positive one.
 
 ## Minimum Architecture Tests
 
-- repository tests for DTO-to-domain mapping and failure translation
-- cubit/bloc tests for the important state transitions — including the failure path
-- widget tests for critical screens with their providers/listeners wired
+- one flow test per feature (`test/features/<f>/<f>_flow_test.dart`): real module registrations and route over a fake data source cover wiring; no "provides X" tests
+- repository, cubit and screen tests only where real mapping, failure translation, rules or interaction logic exists (no forwarding tests; domain services are never mocked)
 - a DI smoke test for new registrations or `registerFactoryParam` flows
+- tests never wait on the clock and leave no global state behind (full runs share an isolate); see the flutter-testing skill
 - architecture boundary tests (`test/architecture_test.dart`) stay green — extend them when you add a rule from this skill

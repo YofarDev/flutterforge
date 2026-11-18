@@ -55,6 +55,11 @@ FGEN = REPO_ROOT / "scripts" / "fgen.sh"
 COMMAND_TIMEOUT = int(os.environ.get("FORGE_TIMEOUT", "300"))
 SLOW_TIMEOUT = int(os.environ.get("FORGE_SLOW_TIMEOUT", "1800"))
 
+# Every script that runs tests holds the machine-wide queue (scripts/fqueue.sh).
+# The harness gets its own, so it never waits on (or blocks) the developer's
+# other projects and its runs stay deterministic.
+os.environ.setdefault("FORGE_QUEUE_DIR", tempfile.mkdtemp(prefix="forge-queue-"))
+
 REAL_DART = shutil.which("dart")
 if REAL_DART is None:
     sys.exit("dart must be on PATH to run the FlutterForge generator tests.")
@@ -176,9 +181,16 @@ def fmt(result: subprocess.CompletedProcess) -> str:
 
 
 def tree_snapshot(root: Path) -> list[tuple[str, bytes]]:
-    """Sorted (relative path, content) snapshot of a tree, symlink-safe."""
+    """Sorted (relative path, content) snapshot of a tree, symlink-safe.
+
+    Git's own object store is skipped: background maintenance (gc, the
+    `maintenance.lock`) may change it at any time without any tool writing to
+    the working tree. Worktree state is what these snapshots protect.
+    """
     entries: list[tuple[str, bytes]] = []
     for path in sorted(root.rglob("*")):
+        if path.relative_to(root).parts[:2] == (".git", "objects"):
+            continue
         if path.is_symlink():
             entries.append((str(path.relative_to(root)), os.readlink(path).encode()))
         elif path.is_file():
@@ -452,6 +464,82 @@ class TestDestinationRefusals(unittest.TestCase):
 # ----------------------------------------------------------------------------------
 
 
+class TestGeneratorEdgeCases(unittest.TestCase):
+    """Edge cases of argument parsing, names and failure reporting."""
+
+    def test_trailing_slash_names_the_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_edge_") as raw:
+            workdir = Path(raw).resolve()
+            env, log = fake_tool_env(workdir)
+            result = run_generator(["--no-open", "my_app/"], cwd=workdir, env=env)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("--project-name=my_app", read_invocations(log)[0])
+            self.assertTrue((workdir / "my_app").is_dir())
+
+    def test_help_flag_as_an_option_value_is_a_value(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_edge_") as raw:
+            workdir = Path(raw).resolve()
+            env, log = fake_tool_env(workdir)
+            result = run_generator(
+                ["--no-open", "--description", "-h", "my_app"], cwd=workdir, env=env
+            )
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("--description=-h", read_invocations(log)[0])
+
+    def test_repeated_option_is_rejected_before_any_tool_runs(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_edge_") as raw:
+            workdir = Path(raw).resolve()
+            env, log = fake_tool_env(workdir)
+            result = run_generator(
+                ["--no-open", "--org=a.b", "--org=c.d", "my_app"], cwd=workdir, env=env
+            )
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("more than once", result.stderr)
+            self.assertEqual(read_invocations(log), [])
+
+    def test_dependency_package_name_is_rejected_up_front(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_edge_") as raw:
+            workdir = Path(raw).resolve()
+            env, log = fake_tool_env(workdir)
+            for name in ("go_router", "intl", "flutter_test"):
+                with self.subTest(name=name):
+                    result = run_generator(["--no-open", name], cwd=workdir, env=env)
+                    self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+                    self.assertIn("depends on", result.stderr)
+                    self.assertFalse((workdir / name).exists())
+            self.assertEqual(read_invocations(log), [])
+
+    def test_destination_inside_the_template_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_edge_") as raw:
+            workdir = Path(raw).resolve()
+            env, log = fake_tool_env(workdir)
+            inside = REPO_ROOT / "forge_inside_template_probe"
+            self.assertFalse(inside.exists())
+            result = run_generator(["--no-open", str(inside)], cwd=workdir, env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("inside the template checkout", result.stderr)
+            self.assertFalse(inside.exists())
+
+    def test_unexpected_error_takes_the_documented_failure_path(self) -> None:
+        """A permission error (not a FailureException) still prints a message
+        and exits 1, never a raw unhandled-exception crash (exit 255)."""
+        if os.geteuid() == 0:
+            self.skipTest("root ignores directory permissions")
+        with tempfile.TemporaryDirectory(prefix="forge_edge_") as raw:
+            workdir = Path(raw).resolve()
+            env, _ = fake_tool_env(workdir)
+            parent = workdir / "readonly"
+            parent.mkdir()
+            parent.chmod(0o555)
+            try:
+                result = run_generator(["--no-open", str(parent / "my_app")], cwd=workdir, env=env)
+            finally:
+                parent.chmod(0o755)
+            self.assertEqual(result.returncode, 1, msg=fmt(result))
+            self.assertIn("Error: unexpected failure", result.stderr)
+            self.assertNotIn("Unhandled exception", result.stderr)
+
+
 class TestSubprocessFailure(unittest.TestCase):
     """A subprocess failure returns nonzero and never reports setup complete."""
 
@@ -505,6 +593,9 @@ class TestFgenRefusals(unittest.TestCase):
         "return",
         "sealed",
         "UPPER!",
+        "new_",
+        "abc_",
+        "a__b",
     ]
 
     def test_invalid_names_write_nothing(self) -> None:
@@ -919,6 +1010,26 @@ class TestFstrInsertion(unittest.TestCase):
             self.assertEqual(en["hello"], "Hello, } and, ]")
             self.assertEqual(fr["hello"], "Bonjour, } et, ]")
 
+    def test_reserved_and_generated_member_keys_are_rejected(self) -> None:
+        for key in ("localeName", "of", "delegate", "supportedLocales", "localizationsDelegates", "new", "class"):
+            with self.subTest(key=key):
+                with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+                    app = self._make_app(Path(raw).resolve())
+                    env, _ = fake_tool_env(app)
+                    before = self._arb_snapshot(app)
+                    result = self._run_fstr(app, key, "Nouveau", "New", env=env)
+                    self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+                    self._assert_arbs_unchanged(app, before)
+
+    def test_failed_gen_l10n_restores_both_arbs_exactly(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            env, _ = fake_tool_env(app, flutter_fail=True)
+            before = self._arb_snapshot(app)
+            result = self._run_fstr(app, "badIcu", "Use {a, b}", "Use {a, b}", env=env)
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self._assert_arbs_unchanged(app, before)
+
     def test_non_json_numeric_constants_change_neither_arb(self) -> None:
         for language in ("fr", "en"):
             for constant in ("NaN", "Infinity", "-Infinity"):
@@ -1034,16 +1145,16 @@ class TestFstrInsertion(unittest.TestCase):
             self.assertEqual(fr["welcomeKey"], "Bienvenue")
             self.assertIn("gen-l10n", read_invocations(log)[0])
 
-    def test_gen_l10n_failure_returns_nonzero_after_update(self) -> None:
+    def test_gen_l10n_failure_returns_nonzero_and_rolls_back(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
             app = self._make_app(Path(raw).resolve())
             env, log = fake_tool_env(app, flutter_fail=True)
             result = self._run_fstr(app, "welcomeKey", "Bienvenue", "Welcome", env=env)
             self.assertNotEqual(result.returncode, 0, msg=fmt(result))
             self.assertIn("gen-l10n", result.stdout + result.stderr)
-            # The ARB update itself succeeded before generation failed.
+            # Generation failed, so the ARB update is rolled back.
             en = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
-            self.assertEqual(en["welcomeKey"], "Welcome")
+            self.assertNotIn("welcomeKey", en)
 
     def test_non_object_root_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_fstr_") as raw:
@@ -1152,6 +1263,26 @@ exit 0
             self.assertIn("+ ./new/helper.dart", result.stdout)
             self.assertIn("Preview only", result.stdout)
             self.assertEqual((app / "lib/main.dart").read_bytes(), before)
+
+    def test_location_field_is_parsed_not_searched(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fimp_loc_") as raw:
+            app = self._make_app(Path(raw).resolve())
+            (app / "lib" / "new").mkdir()
+            (app / "lib" / "new" / "contest.dart").write_text("void c() {}\n")
+            (app / "lib" / "main.dart").write_text("import './old/contest.dart';\nvoid main() {}\n")
+            out = (
+                "Analyzing fimp_app...\n\n"
+                "  error \u2022 Target of URI doesn't exist: './old/contest.dart' \u2022 lib/main.dart:1:8 \u2022 uri_does_not_exist\n"
+                "  error \u2022 Target of URI doesn't exist: 'package:fimp_app/features/contest/contest.dart' "
+                "\u2022 lib/x.dart:1:8 \u2022 uri_does_not_exist\n"
+                "2 issues found.\n"
+            )
+            (app / "lib" / "x.dart").write_text("import 'package:fimp_app/features/contest/contest.dart';\n")
+            env = self._fake_env(app, out)
+            result = self._run_fimp(app, env=env)
+            self.assertNotIn("Traceback", result.stderr, msg=fmt(result))
+            self.assertNotIn("OSError", result.stderr, msg=fmt(result))
+            self.assertIn("+ ./new/contest.dart", result.stdout, msg=fmt(result))
 
     def test_token_repairs_preserve_comments_strings_and_combinators(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_fimp_tokens_") as raw:
@@ -1455,6 +1586,8 @@ class TestShippedToolingAllowlist(unittest.TestCase):
         "fdead.sh",
         "fcheck.sh",
         "fmap.sh",
+        "ftest.sh",
+        "fqueue.sh",
         "sync_skills.sh",
         "fimp.py",
         "render_feature.py",
@@ -1481,6 +1614,11 @@ class TestShippedToolingAllowlist(unittest.TestCase):
             shipped = {path.name for path in (app / "scripts").iterdir()}
             self.assertEqual(shipped, self.ALLOWED_SCRIPTS)
             self.assertFalse((app / "tools").exists(), "test_template.py never ships")
+            self.assertEqual(
+                (app / "build.yaml").read_text(),
+                (REPO_ROOT / "build.yaml").read_text(),
+                "build.yaml (codegen scope) ships verbatim",
+            )
             self.assertFalse(
                 (app / "test" / "architecture_checker_test.dart").exists(),
                 "checker self-tests stay in the template (tools/checker_tests/)",
@@ -1575,7 +1713,9 @@ class TestFverifyGate(unittest.TestCase):
     """fverify.sh: non-mutating by default, opt-in --fix preparation, quiet
     test reporter, and plain (colour-free) output when captured."""
 
-    FORMAT_CHECK = ["format", "--output=none", "--set-exit-if-changed", "."]
+    # Only the Dart source roots that exist (here lib/ and test/): never `.`,
+    # which would walk build/ (SPM checkouts, vendored plugin code).
+    FORMAT_CHECK = ["format", "--output=none", "--set-exit-if-changed", "lib", "test"]
 
     def _run(
         self, args: list[str], *, flutter_fail: bool = False, dart_fail: bool = False,
@@ -1584,6 +1724,8 @@ class TestFverifyGate(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="forge_fverify_") as raw:
             root = Path(raw).resolve()
             app = make_fake_app(root)
+            (app / "test").mkdir()
+            (app / "build" / "ios" / "SourcePackages").mkdir(parents=True)
             env, log = fake_tool_env(root, flutter_fail=flutter_fail, dart_fail=dart_fail)
             if fix_preview is not None:
                 env["FORGE_FAKE_FIX_PREVIEW"] = fix_preview
@@ -1605,7 +1747,7 @@ class TestFverifyGate(unittest.TestCase):
             [
                 self.FORMAT_CHECK,
                 ["analyze", "--no-pub"],
-                ["test", "--reporter", "failures-only"],
+                ["test", "--concurrency=4", "--reporter", "failures-only"],
             ],
         )
         self.assertNotIn("\x1b[", result.stdout + result.stderr)
@@ -1618,10 +1760,10 @@ class TestFverifyGate(unittest.TestCase):
             [
                 ["fix", "--dry-run"],
                 ["fix", "--apply"],
-                ["format", "."],
+                ["format", "lib", "test"],
                 self.FORMAT_CHECK,
                 ["analyze", "--no-pub"],
-                ["test", "--reporter", "failures-only"],
+                ["test", "--concurrency=4", "--reporter", "failures-only"],
             ],
         )
 
@@ -1634,12 +1776,12 @@ class TestFverifyGate(unittest.TestCase):
     def test_fix_with_nothing_to_fix_skips_apply(self) -> None:
         result, calls = self._run(["--fix"], fix_preview="Nothing to fix!")
         self.assertEqual(result.returncode, 0, msg=fmt(result))
-        self.assertEqual(calls[:2], [["fix", "--dry-run"], ["format", "."]])
+        self.assertEqual(calls[:2], [["fix", "--dry-run"], ["format", "lib", "test"]])
 
     def test_explicit_reporter_and_extra_arguments_are_forwarded(self) -> None:
         result, calls = self._run(["-r", "expanded", "--fix", "--coverage"])
         self.assertEqual(result.returncode, 0, msg=fmt(result))
-        self.assertEqual(calls[-1], ["test", "-r", "expanded", "--coverage"])
+        self.assertEqual(calls[-1], ["test", "--concurrency=4", "-r", "expanded", "--coverage"])
 
     def test_format_failure_still_reports_analysis_and_tests(self) -> None:
         result, calls = self._run([], dart_fail=True)
@@ -1650,6 +1792,374 @@ class TestFverifyGate(unittest.TestCase):
         result, calls = self._run([], flutter_fail=True)
         self.assertNotEqual(result.returncode, 0, msg=fmt(result))
         self.assertEqual([call[0] for call in calls], ["format", "analyze"])
+
+
+class TestTestQueue(unittest.TestCase):
+    """ftest.sh / fverify.sh share a machine-wide queue (scripts/fqueue.sh):
+    concurrent runs take turns, a dead holder's slot is reclaimed, failures
+    propagate, and FORGE_QUEUE=0 bypasses it. Runs under the system Bash."""
+
+    FAKE_FLUTTER = (
+        "#!/bin/bash\n"
+        "echo \"start $FAKE_ID\" >> \"$FAKE_LOG\"\n"
+        "sleep 1\n"
+        "echo \"end $FAKE_ID\" >> \"$FAKE_LOG\"\n"
+        "exit \"${FAKE_EXIT:-0}\"\n"
+    )
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="forge-queue-test-")
+        root = Path(self.tmp.name)
+        self.app = root / "app"
+        (self.app / "scripts").mkdir(parents=True)
+        (self.app / "pubspec.yaml").write_text("name: queue_app\n")
+        for name in ("ftest.sh", "fqueue.sh"):
+            shutil.copy(REPO_ROOT / "scripts" / name, self.app / "scripts" / name)
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        flutter = bin_dir / "flutter"
+        flutter.write_text(self.FAKE_FLUTTER)
+        flutter.chmod(0o755)
+        self.queue = root / "queue"
+        self.log = root / "log"
+        self.log.touch()
+        self.env = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "FORGE_QUEUE_DIR": str(self.queue),
+            "FAKE_LOG": str(self.log),
+        }
+        self.env.pop("FQUEUE_HELD", None)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _start(self, fake_id: str, **extra: str) -> subprocess.Popen:
+        return subprocess.Popen(
+            [SYSTEM_BASH, "scripts/ftest.sh"],
+            cwd=self.app,
+            env={**self.env, "FAKE_ID": fake_id, **extra},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    def _events(self) -> list[str]:
+        return self.log.read_text().split("\n")[:-1]
+
+    def test_concurrent_runs_take_turns(self) -> None:
+        first = self._start("A")
+        import time
+
+        time.sleep(0.4)
+        second = self._start("B")
+        out_b, _ = second.communicate(timeout=60)
+        first.communicate(timeout=60)
+        self.assertEqual(self._events(), ["start A", "end A", "start B", "end B"])
+        self.assertIn("waiting for a free slot", out_b)
+        self.assertEqual(list(self.queue.iterdir()), [], "slot released")
+
+    def test_two_slots_allow_two_concurrent_runs(self) -> None:
+        runs = [self._start(i, FORGE_QUEUE_SLOTS="2") for i in ("A", "B")]
+        for run in runs:
+            run.communicate(timeout=60)
+        self.assertEqual(sorted(self._events()[:2]), ["start A", "start B"])
+
+    def test_dead_holder_slot_is_reclaimed(self) -> None:
+        slot = self.queue / "heavy-slot-0"
+        slot.mkdir(parents=True)
+        (slot / "owner").write_text("999999\n/elsewhere\nghost\n")
+        result = self._start("C")
+        out, _ = result.communicate(timeout=60)
+        self.assertEqual(result.returncode, 0, msg=out)
+        self.assertEqual(self._events(), ["start C", "end C"])
+
+    def test_failure_propagates_and_releases(self) -> None:
+        result = self._start("D", FAKE_EXIT="7")
+        result.communicate(timeout=60)
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(list(self.queue.iterdir()), [])
+
+    def test_slowest_prints_a_timing_summary_and_keeps_the_exit_code(self) -> None:
+        if shutil.which("uv") is None:
+            self.skipTest("uv not on PATH")
+        events = [
+            {"type": "suite", "suite": {"id": 0, "path": "test/a_test.dart"}},
+            {"type": "testStart", "test": {"id": 1, "suiteID": 0, "name": "loading test/a_test.dart"}, "time": 0},
+            {"type": "testDone", "testID": 1, "time": 3000},
+            {"type": "testStart", "test": {"id": 2, "suiteID": 0, "name": "slow one"}, "time": 3000},
+            {"type": "testDone", "testID": 2, "time": 5500},
+            {"type": "testStart", "test": {"id": 3, "suiteID": 0, "name": "fast one"}, "time": 5500},
+            {"type": "testDone", "testID": 3, "time": 5600},
+        ]
+        canned = Path(self.tmp.name) / "events.jsonl"
+        canned.write_text("".join(json.dumps(event) + "\n" for event in events))
+        fake = Path(self.tmp.name) / "bin" / "flutter"
+        fake.write_text(
+            "#!/bin/bash\n"
+            "for arg in \"$@\"; do case \"$arg\" in json:*) cp \"$CANNED\" \"${arg#json:}\" ;; esac; done\n"
+            "exit 3\n"
+        )
+        result = subprocess.run(
+            [SYSTEM_BASH, "scripts/ftest.sh", "--slowest=1"],
+            cwd=self.app, env={**self.env, "CANNED": str(canned)},
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(result.returncode, 3, msg=fmt(result))
+        self.assertIn("5.60s  test/a_test.dart", result.stdout)
+        self.assertIn("2.50s  test/a_test.dart: slow one", result.stdout)
+        self.assertNotIn("fast one", result.stdout)
+        self.assertEqual(list(self.queue.iterdir()), [])
+
+    def test_slowest_rejects_a_bad_count(self) -> None:
+        result = self._start("Z")
+        result.communicate(timeout=60)
+        bad = subprocess.run(
+            [SYSTEM_BASH, "scripts/ftest.sh", "--slowest=abc"],
+            cwd=self.app, env=self.env, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(bad.returncode, 2)
+        self.assertIn("positive number", bad.stderr)
+
+    def test_queue_can_be_disabled(self) -> None:
+        slot = self.queue / "heavy-slot-0"
+        slot.mkdir(parents=True)
+        (slot / "owner").write_text(f"{os.getpid()}\n/busy\nholder\n")
+        result = self._start("E", FORGE_QUEUE="0")
+        out, _ = result.communicate(timeout=60)
+        self.assertEqual(result.returncode, 0, msg=out)
+        self.assertEqual(self._events(), ["start E", "end E"])
+
+
+class TestFtestRuns(unittest.TestCase):
+    """ftest.sh run shapes (fake flutter records its arguments): scoped runs
+    take the light lane with -j2; full runs compile one aggregated entrypoint,
+    keep golden/annotated files standalone, skip an unchanged architecture
+    gate; compile errors print once; a holder killed while its command still
+    runs keeps the slot."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="forge-ftest-")
+        root = Path(self.tmp.name)
+        self.app = root / "app"
+        for rel in ("scripts", "lib", "test/features/a", "test/core"):
+            (self.app / rel).mkdir(parents=True)
+        (self.app / "pubspec.yaml").write_text("name: run_app\n")
+        (self.app / "lib" / "a.dart").write_text("int a = 1;\n")
+        for name in ("ftest.sh", "fqueue.sh"):
+            shutil.copy(REPO_ROOT / "scripts" / name, self.app / "scripts" / name)
+        (self.app / "test" / "flutter_test_config.dart").write_text("// config\n")
+        (self.app / "test" / "architecture_test.dart").write_text("void main() {}\n")
+        (self.app / "test" / "features" / "a" / "a_flow_test.dart").write_text("void main() {}\n")
+        (self.app / "test" / "core" / "golden_test.dart").write_text(
+            "void main() { matchesGoldenFile('x.png'); }\n"
+        )
+        (self.app / "test" / "core" / "args_test.dart").write_text("void main(List<String> a) {}\n")
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        self.calls = root / "calls"
+        flutter = bin_dir / "flutter"
+        flutter.write_text(
+            "#!/bin/bash\n"
+            "echo \"$*\" >> \"$CALLS\"\n"
+            "if [ -n \"${FAKE_OUTPUT:-}\" ]; then cat \"$FAKE_OUTPUT\"; fi\n"
+            "sleep \"${FAKE_SLEEP:-0}\"\n"
+            "exit \"${FAKE_EXIT:-0}\"\n"
+        )
+        flutter.chmod(0o755)
+        self.queue = root / "queue"
+        self.env = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "FORGE_QUEUE_DIR": str(self.queue),
+            "CALLS": str(self.calls),
+        }
+        for key in ("FQUEUE_HELD", "CI", "FORGE_ARCH_ALWAYS", "FORGE_TEST_AGGREGATE", "FORGE_TEST_CONCURRENCY"):
+            self.env.pop(key, None)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _ftest(self, *args: str, **extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [SYSTEM_BASH, "scripts/ftest.sh", *args], cwd=self.app,
+            env={**self.env, **extra}, capture_output=True, text=True, timeout=120,
+        )
+
+    def _last_call(self) -> list[str]:
+        return self.calls.read_text().splitlines()[-1].split()
+
+    def test_scoped_run_uses_the_light_lane_without_aggregation(self) -> None:
+        result = self._ftest("test/features/a")
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        self.assertEqual(
+            self._last_call(),
+            ["test", "--concurrency=2", "--reporter", "failures-only", "test/features/a"],
+        )
+
+    def test_full_run_aggregates_and_skips_an_unchanged_architecture_gate(self) -> None:
+        first = self._ftest()
+        self.assertEqual(first.returncode, 0, msg=fmt(first))
+        call = self._last_call()
+        self.assertEqual(call[:4], ["test", "--concurrency=4", "--reporter", "failures-only"])
+        self.assertEqual(
+            sorted(call[4:]),
+            sorted([
+                ".dart_tool/flutterforge/shard_0_test.dart",
+                "test/core/args_test.dart",
+                "test/core/golden_test.dart",
+                "test/architecture_test.dart",
+            ]),
+        )
+        entry = (self.app / ".dart_tool" / "flutterforge" / "shard_0_test.dart").read_text()
+        self.assertIn("import '../../test/features/a/a_flow_test.dart' as t0;", entry)
+        self.assertIn("forge_config.testExecutable(_all)", entry)
+        self.assertNotIn("golden_test", entry)
+
+        second = self._ftest()
+        self.assertIn("architecture gate", second.stdout)
+        self.assertNotIn("test/architecture_test.dart", self._last_call())
+
+        (self.app / "lib" / "a.dart").write_text("int a = 2;\n")
+        self._ftest()
+        self.assertIn("test/architecture_test.dart", self._last_call())
+
+    def test_failed_run_never_stamps_the_architecture_gate(self) -> None:
+        self._ftest(FAKE_EXIT="1")
+        self._ftest()
+        self.assertIn("test/architecture_test.dart", self._last_call())
+
+    def test_ci_always_runs_the_architecture_gate(self) -> None:
+        self._ftest()
+        self._ftest(CI="true")
+        self.assertIn("test/architecture_test.dart", self._last_call())
+
+    def test_aggregation_can_be_disabled(self) -> None:
+        self._ftest(FORGE_TEST_AGGREGATE="0")
+        self.assertEqual(self._last_call(), ["test", "--concurrency=4", "--reporter", "failures-only"])
+
+    def test_compile_errors_print_once_without_tool_frames(self) -> None:
+        output = Path(self.tmp.name) / "out.txt"
+        root = str(self.app.resolve())  # flutter prints physical paths
+        block = (
+            f"{root}/lib/a.dart:1:5: Error: Expected ';' after this.\n"
+            "int a = 1\n"
+            "    ^\n"
+            "#0 main (package:flutter_tools/src/test/runner.dart:12:3)\n"
+            "#1 x (dart:async/zone.dart:1:1)\n"
+        )
+        output.write_text(block * 5)
+        result = self._ftest("test/features/a", FAKE_OUTPUT=str(output), FAKE_EXIT="1")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.count("Error: Expected"), 1, msg=result.stdout)
+        self.assertIn("lib/a.dart:1:5", result.stdout)
+        self.assertNotIn(root, result.stdout)
+        self.assertNotIn("flutter_tools", result.stdout)
+        self.assertIn("4 repeated compile error(s) omitted", result.stdout)
+
+    def test_light_run_does_not_wait_behind_a_heavy_run(self) -> None:
+        slot = self.queue / "heavy-slot-0"
+        slot.mkdir(parents=True)
+        (slot / "owner").write_text(f"{os.getpid()}\n/busy\nholder\n")
+        result = self._ftest("test/features/a")
+        self.assertEqual(result.returncode, 0, msg=fmt(result))
+        self.assertNotIn("waiting", result.stdout)
+
+    def test_slot_survives_its_killed_holder_while_the_command_runs(self) -> None:
+        import signal
+        import time
+
+        holder = subprocess.Popen(
+            [SYSTEM_BASH, "scripts/ftest.sh", "test/features/a"], cwd=self.app,
+            env={**self.env, "FAKE_SLEEP": "6"}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        slot = self.queue / "light-slot-0"
+        deadline = time.time() + 20
+        while not (slot / "child").exists() and time.time() < deadline:
+            time.sleep(0.1)
+        child = int((slot / "child").read_text().split()[0])
+        holder.send_signal(signal.SIGKILL)
+        holder.wait(timeout=10)
+        waiter = self._ftest("test/features/a")  # must wait for the orphaned run
+        self.assertIn("waiting", waiter.stdout)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
+
+
+class TestFlutterShim(unittest.TestCase):
+    """personal_tools/flutter_shim.sh: a `flutter` ahead of the SDK on PATH
+    queues `test`/`analyze` (scripts/fqueue.sh) and passes everything else,
+    `--watch` and already-queued runs straight to the real flutter."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="forge-shim-")
+        root = Path(self.tmp.name)
+        real = root / "real"
+        shim_bin = root / "shim"
+        real.mkdir()
+        shim_bin.mkdir()
+        fake = real / "flutter"
+        fake.write_text(
+            "#!/bin/bash\n"
+            "echo \"start $FAKE_ID $*\" >> \"$FAKE_LOG\"\n"
+            "[ \"$1\" = test ] && sleep 1\n"
+            "echo \"end $FAKE_ID\" >> \"$FAKE_LOG\"\n"
+        )
+        fake.chmod(0o755)
+        (shim_bin / "flutter").symlink_to(REPO_ROOT / "personal_tools" / "flutter_shim.sh")
+        self.log = root / "log"
+        self.log.touch()
+        self.queue = root / "queue"
+        self.env = {
+            **os.environ,
+            "PATH": f"{shim_bin}{os.pathsep}{real}{os.pathsep}{os.environ['PATH']}",
+            "FORGE_QUEUE_DIR": str(self.queue),
+            "FAKE_LOG": str(self.log),
+        }
+        self.env.pop("FQUEUE_HELD", None)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _start(self, fake_id: str, *args: str, **extra: str) -> subprocess.Popen:
+        return subprocess.Popen(
+            ["flutter", *args],
+            env={**self.env, "FAKE_ID": fake_id, **extra},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    def _events(self) -> list[str]:
+        return self.log.read_text().split("\n")[:-1]
+
+    def test_bare_flutter_test_runs_take_turns(self) -> None:
+        import time
+
+        first = self._start("A", "test")
+        time.sleep(0.4)
+        second = self._start("B", "test")
+        second.communicate(timeout=60)
+        first.communicate(timeout=60)
+        self.assertEqual(self._events(), ["start A test", "end A", "start B test", "end B"])
+
+    def test_other_commands_and_held_runs_pass_through(self) -> None:
+        slot = self.queue / "heavy-slot-0"
+        slot.mkdir(parents=True)
+        (slot / "owner").write_text(f"{os.getpid()}\n/busy\nholder\n")
+        for fake_id, args, extra in (
+            ("V", ("--version",), {}),
+            ("W", ("analyze", "--watch"), {}),
+            ("H", ("test",), {"FQUEUE_HELD": "1"}),
+        ):
+            with self.subTest(args=args):
+                run = self._start(fake_id, *args, **extra)
+                run.communicate(timeout=30)
+                self.assertEqual(run.returncode, 0)
+        self.assertEqual(
+            [event for event in self._events() if event.startswith("start")],
+            ["start V --version", "start W analyze --watch", "start H test"],
+        )
 
 
 class TestFanalModules(unittest.TestCase):
@@ -1685,6 +2195,128 @@ class TestFanalModules(unittest.TestCase):
             self.assertIn("Modules not called from `lib/core/di/service_locator.dart`: `lib/features/cart/cart_module.dart`", report)
             self.assertIn("not spread into `lib/core/router/app_router.dart`: `lib/features/cart/cart_module.dart`", report)
             self.assertNotIn("shop_module.dart`", report.split("Modules not called")[1].split("\n")[0])
+
+
+class TestFanalCrossFeature(unittest.TestCase):
+    """fanal.sh resolves relative and package imports before comparing features,
+    and counts only *_test.dart files per feature."""
+
+    def test_relative_and_package_cross_feature_imports_and_test_counts(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fanal_x_") as raw:
+            app = make_fake_app(Path(raw).resolve())
+            name = next(
+                line.split(":", 1)[1].strip()
+                for line in (app / "pubspec.yaml").read_text().splitlines()
+                if line.startswith("name:")
+            )
+            files = {
+                "lib/features/home/presentation/screens/home_screen.dart": (
+                    "import '../../../counter/data/repositories/counter_repository_impl.dart';\n"
+                    f"import 'package:{name}/features/cart/presentation/cart_view.dart';\n"
+                    "import '../../../cart/domain/cart.dart';\n"
+                    "import '../widgets/own.dart';\n"
+                ),
+                "lib/features/counter/data/repositories/counter_repository_impl.dart": "class A {}\n",
+                "lib/features/cart/presentation/cart_view.dart": "class B {}\n",
+                "lib/features/cart/domain/cart.dart": "class C {}\n",
+                "test/features/counter/data/repositories/counter_repository_impl_test.dart": "void main() {}\n",
+                "test/features/counter/data/x_test.dart": "void main() {}\n",
+            }
+            for rel, text in files.items():
+                (app / rel).parent.mkdir(parents=True, exist_ok=True)
+                (app / rel).write_text(text)
+            result = run_command([SYSTEM_BASH, str(REPO_ROOT / "scripts" / "fanal.sh"), str(app)], cwd=app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            report = (app / "flutter_analysis.md").read_text()
+            self.assertNotIn("No imports into another feature's data/presentation layers", report)
+            self.assertIn("**home** -> **counter/data**", report)
+            self.assertIn("**home** -> **cart/presentation**", report)
+            self.assertIn("**home** -> **cart/domain**", report)
+            self.assertIn("counter (2 file(s))", report)
+
+
+class TestFdeadEntryPoints(unittest.TestCase):
+    """fdead --test never reports auto-loaded test config or flavor entry points."""
+
+    def test_flavor_main_and_test_config_not_reported(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fdead_ep_") as raw:
+            app = Path(raw).resolve() / "app"
+            files = {
+                "pubspec.yaml": "name: app\n",
+                "lib/main.dart": "void main() {}\n",
+                "lib/main_dev.dart": "void main() {}\n",
+                "lib/orphan.dart": "void o() {}\n",
+                "test/flutter_test_config.dart": "Future<void> testExecutable(f) async => f();\n",
+            }
+            for rel, text in files.items():
+                (app / rel).parent.mkdir(parents=True, exist_ok=True)
+                (app / rel).write_text(text)
+            result = run_command(["bash", str(REPO_ROOT / "scripts" / "fdead.sh"), "--test"], cwd=app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("orphan.dart", result.stdout)
+            self.assertNotIn("main_dev.dart", result.stdout)
+            self.assertNotIn("flutter_test_config.dart", result.stdout.split("advisory")[0])
+
+
+class TestFcheckImports(unittest.TestCase):
+    """fcheck.sh sees double-quoted imports and exports, and matches package names exactly."""
+
+    def _app(self, parent: Path) -> Path:
+        app = parent / "app"
+        (app / "lib").mkdir(parents=True)
+        (app / "pubspec.yaml").write_text(
+            "name: app\ndependencies:\n  flutter:\n    sdk: flutter\n  alpha: ^1.0.0\n"
+            "  beta: ^1.0.0\n  get: ^1.0.0\n  get_it: ^1.0.0\n  gamma: ^1.0.0\n"
+        )
+        (app / "lib" / "a.dart").write_text(
+            'import "package:alpha/alpha.dart";\nexport \'package:beta/beta.dart\';\n'
+            "import 'package:get_it/get_it.dart';\n"
+        )
+        return app
+
+    def test_all_mode_counts_double_quotes_and_exports(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fcheck_") as raw:
+            app = self._app(Path(raw).resolve())
+            result = run_command(["bash", str(REPO_ROOT / "scripts" / "fcheck.sh")], cwd=app)
+            self.assertNotIn("❌ alpha", result.stdout, msg=fmt(result))
+            self.assertNotIn("❌ beta", result.stdout, msg=fmt(result))
+            self.assertIn("❌ gamma", result.stdout)
+            self.assertIn("❌ get\n", result.stdout + "\n")
+
+    def test_single_package_mode_is_exact(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fcheck1_") as raw:
+            app = self._app(Path(raw).resolve())
+            script = str(REPO_ROOT / "scripts" / "fcheck.sh")
+            self.assertIn("IS used", run_command(["bash", script, "get_it"], cwd=app).stdout)
+            self.assertIn("IS used", run_command(["bash", script, "alpha"], cwd=app).stdout)
+            self.assertIn("NOT directly imported", run_command(["bash", script, "get"], cwd=app).stdout)
+
+
+class TestFl10nScan(unittest.TestCase):
+    """fl10n.sh: l10n ancestor dirs, generated-dir exclusion, '/*' inside strings."""
+
+    def test_ancestor_l10n_dir_and_glob_string_and_no_venv(self) -> None:
+        if shutil.which("uv") is None:
+            self.skipTest("uv is not on PATH")
+        with tempfile.TemporaryDirectory(prefix="forge_fl10n_") as raw:
+            outer = Path(raw).resolve()
+            (outer / "pyproject.toml").write_text('[project]\nname = "outer"\nversion = "0"\nrequires-python = ">=3.9"\n')
+            app = outer / "l10n" / "app"
+            (app / "lib" / "core" / "l10n" / "generated").mkdir(parents=True)
+            (app / "pubspec.yaml").write_text("name: fake_app\n")
+            (app / "lib" / "core" / "l10n" / "generated" / "app_localizations.dart").write_text(
+                "const a = 'Generated Message Here';\n"
+            )
+            (app / "lib" / "foo.dart").write_text(
+                "const String glob = 'docs/*';\n"
+                "const Widget w = Text('Visible After Glob');\n"
+            )
+            result = run_command([SYSTEM_BASH, str(REPO_ROOT / "scripts" / "fl10n.sh")], cwd=app)
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("Visible After Glob", result.stdout)
+            self.assertNotIn("Generated Message Here", result.stdout)
+            self.assertFalse((outer / ".venv").exists())
+            self.assertFalse((outer / "uv.lock").exists())
 
 
 class TestFmap(unittest.TestCase):
@@ -1808,6 +2440,22 @@ class TestFwireMultilineImports(unittest.TestCase):
                          str(app), "shop", "Shop", "shop", "demo_app"], cwd=app)
             text = locator.read_text()
             self.assertIn("        B;\nimport '../../features/shop/shop_module.dart';\n", text)
+
+
+class TestFwireCrlf(unittest.TestCase):
+    def test_crlf_files_keep_crlf(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_fwire_crlf_") as raw:
+            app = Path(raw).resolve()
+            locator = app / "lib/core/di/service_locator.dart"
+            locator.parent.mkdir(parents=True)
+            locator.write_bytes(
+                b"import 'package:get_it/get_it.dart';\r\n\r\nvoid setup() {\r\n  // fgen:register-features\r\n}\r\n"
+            )
+            result = run_command(["uv", "run", "--no-project", str(REPO_ROOT / "scripts/fwire.py"), "apply",
+                                  str(app), "shop", "Shop", "shop", "demo_app"], cwd=app)
+            data = locator.read_bytes()
+            self.assertIn(b"registerShopFeature(getIt);", data, msg=fmt(result))
+            self.assertEqual(data.count(b"\n"), data.count(b"\r\n"), msg=repr(data))
 
 
 class TestUpgradePlan(unittest.TestCase):
@@ -1962,6 +2610,59 @@ class TestUpgradePlan(unittest.TestCase):
             self.assertTrue((app / "lib/core/new.dart").exists())
 
 
+    def test_new_script_is_added_executable(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_plan_") as raw:
+            root = Path(raw).resolve()
+            tpl = self._template(root)
+            script = tpl / "scripts" / "new_tool.sh"
+            script.write_text("echo new\n")
+            script.chmod(0o755)
+            run_command(["git", "add", "-A"], cwd=tpl)
+            run_command(["git", *self.IDENT, "commit", "-qm", "c3"], cwd=tpl)
+            app = self._app(root, {})
+            result = run_command(
+                ["uv", "run", "--no-project", str(self.HELPER), "--template", str(tpl),
+                 "--app", str(app), "--base", "HEAD~2"],
+                cwd=app,
+            )
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            added = app / "scripts" / "new_tool.sh"
+            self.assertTrue(added.exists(), msg=result.stdout)
+            self.assertTrue(os.access(added, os.X_OK), "new scripts must stay executable")
+
+    def test_base_newer_than_head_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_plan_") as raw:
+            root = Path(raw).resolve()
+            tpl = self._template(root)
+            app = self._app(root, {})
+            before = tree_snapshot(app)
+            result = run_command(
+                ["uv", "run", "--no-project", str(self.HELPER), "--template", str(tpl),
+                 "--app", str(app), "--base", "HEAD", "--head", "HEAD~1"],
+                cwd=app,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("not an ancestor", result.stderr)
+            self.assertEqual(tree_snapshot(app), before)
+
+    def test_corrupt_stamp_is_a_clear_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_plan_") as raw:
+            root = Path(raw).resolve()
+            tpl = self._template(root)
+            app = self._app(root, {})
+            (app / ".flutterforge.json").write_text("{not json")
+            run_command(["git", "add", "-A"], cwd=app)
+            run_command(["git", *self.IDENT, "commit", "-qm", "stamp"], cwd=app)
+            result = run_command(
+                ["uv", "run", "--no-project", str(self.HELPER), "--template", str(tpl),
+                 "--app", str(app), "--dry-run"],
+                cwd=app,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertIn("not valid JSON", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+
+
 class TestUpgradeHelper(unittest.TestCase):
     """prepare_upgrade.py (flutterforge-upgrade skill) against this repository's
     own committed history: base detection, 3-way staging, and the stamp."""
@@ -2052,6 +2753,85 @@ class TestUpgradeHelper(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=fmt(result))
             self.assertIn("Already up to date.", result.stdout)
 
+    def _stamped_app(self, root: Path, commit: str) -> Path:
+        app = self._make_app(root, self.base)
+        (app / ".flutterforge.json").write_text(json.dumps({"templateCommit": commit}))
+        run_command(["git", "add", "-A"], cwd=app)
+        run_command(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                     "-qm", "stamp"], cwd=app)
+        return app
+
+    def test_unresolvable_stamp_commit_is_an_error_not_up_to_date(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            app = self._stamped_app(Path(raw).resolve(), "0" * 40)
+            result = self._upgrade(app, "--dry-run")
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertNotIn("Already up to date.", result.stdout)
+            self.assertIn("not in this template checkout", result.stderr)
+
+    def test_shallow_template_clone_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            root = Path(raw).resolve()
+            app = self._stamped_app(root, self.base)
+            shallow = root / "shallow_template"
+            clone = run_command(
+                ["git", "clone", "-q", "--depth", "1", f"file://{REPO_ROOT}", str(shallow)],
+                cwd=root,
+            )
+            self.assertEqual(clone.returncode, 0, msg=fmt(clone))
+            result = run_command(
+                ["uv", "run", "--no-project", str(self.HELPER), "--template", str(shallow),
+                 "--app", str(app), "--dry-run"],
+                cwd=app,
+                timeout=SLOW_TIMEOUT,
+            )
+            self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+            self.assertNotIn("Already up to date.", result.stdout)
+            self.assertIn("shallow clone", result.stderr)
+
+
+class TestSyncSkillsTargets(unittest.TestCase):
+    """sync_skills.sh --user from an (older) app never writes through a user
+    skill symlink into another checkout's canonical .agents/skills, and syncs
+    every skill file, not only Markdown."""
+
+    def test_symlinked_canonical_source_is_never_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="forge_sync_") as raw:
+            root = Path(raw).resolve()
+            app = root / "app"
+            (app / "scripts").mkdir(parents=True)
+            shutil.copytree(REPO_ROOT / ".agents", app / ".agents")
+            shutil.copy(REPO_ROOT / "scripts" / "sync_skills.sh", app / "scripts")
+            old = app / ".agents/skills/flutter-audit/SKILL.md"
+            old.write_text(old.read_text() + "\n<!-- older app copy -->\n")
+
+            canonical = root / "other_template/.agents/skills/flutter-audit"
+            shutil.copytree(REPO_ROOT / ".agents/skills/flutter-audit", canonical)
+            pristine = (canonical / "SKILL.md").read_bytes()
+            home = root / "home"
+            (home / ".agents/skills").mkdir(parents=True)
+            (home / ".claude/skills").mkdir(parents=True)
+            (home / ".agents/skills/flutter-audit").symlink_to(canonical)
+            user_copy = home / ".agents/skills/flutterforge-upgrade"
+            user_copy.mkdir()
+            (user_copy / "SKILL.md").write_text("stale\n")
+
+            env = dict(os.environ, HOME=str(home))
+            result = subprocess.run(
+                ["bash", "scripts/sync_skills.sh", "--user"],
+                cwd=app, env=env, capture_output=True, text=True, timeout=COMMAND_TIMEOUT,
+            )
+            self.assertEqual(result.returncode, 0, msg=fmt(result))
+            self.assertEqual((canonical / "SKILL.md").read_bytes(), pristine)
+            self.assertIn("another checkout's canonical source", result.stdout)
+            # A real user copy is synchronized, helper script (and its mode) included.
+            helper = user_copy / "prepare_upgrade.py"
+            self.assertTrue(helper.exists(), msg=result.stdout)
+            self.assertEqual(
+                helper.stat().st_mode & 0o777,
+                (app / ".agents/skills/flutterforge-upgrade/prepare_upgrade.py").stat().st_mode & 0o777,
+            )
+
 
 class TestVerifyTemplateScript(unittest.TestCase):
     """The root verification entry point obeys its own contract."""
@@ -2137,6 +2917,55 @@ class TestPackageSpecs(unittest.TestCase):
             self.assertIn(f"{package}:", joined)
 
 
+class TestGeneratedGitignore(unittest.TestCase):
+    """template-gitignore never swallows app source: a feature named after a
+    generic tool directory (build, out, gen, bin, tags, ...) stays tracked,
+    while the real build/generated outputs stay ignored."""
+
+    FEATURE_NAMES = ("bin", "build", "captures", "freeline", "gen", "out", "proguard", "tags")
+
+    def setUp(self) -> None:
+        if shutil.which("git") is None:
+            self.skipTest("git not on PATH")
+        self.tmp = tempfile.TemporaryDirectory(prefix="forge-gitignore-")
+        self.root = Path(self.tmp.name)
+        subprocess.run(["git", "init", "-q"], cwd=self.root, check=True)
+        shutil.copy(REPO_ROOT / "template-gitignore", self.root / ".gitignore")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _ignored(self, paths: list[str]) -> set[str]:
+        for rel in paths:
+            target = self.root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+        result = subprocess.run(
+            ["git", "check-ignore", *paths], cwd=self.root, capture_output=True, text=True
+        )
+        return set(result.stdout.split())
+
+    def test_features_named_like_tool_directories_are_tracked(self) -> None:
+        paths = [
+            f"{tree}/features/{name}/{name}.dart"
+            for name in self.FEATURE_NAMES
+            for tree in ("lib", "test")
+        ]
+        self.assertEqual(self._ignored(paths), set())
+
+    def test_pubspec_lock_is_committed(self) -> None:
+        self.assertEqual(self._ignored(["pubspec.lock"]), set())
+
+    def test_build_and_generated_outputs_stay_ignored(self) -> None:
+        paths = [
+            "build/app.dill",
+            "android/app/build/out.apk",
+            "ios/build/x.o",
+            "lib/core/l10n/generated/app_localizations.dart",
+        ]
+        self.assertEqual(self._ignored(paths), set(paths))
+
+
 class TestRemoveCounterHarmless(unittest.TestCase):
     """remove_counter.sh on an app without the counter is a harmless no-op."""
 
@@ -2160,6 +2989,77 @@ class TestRemoveCounterHarmless(unittest.TestCase):
                 (app / "pubspec.yaml").read_text(),
                 "name: fake_app\ndescription: x\n",
             )
+
+
+    def test_user_feature_with_counter_in_name_stays_wired_and_unused_keys_removed(self) -> None:
+        if shutil.which("uv") is None:
+            self.skipTest("uv is not on PATH")
+        with tempfile.TemporaryDirectory(prefix="forge_rmctr2_") as raw:
+            app = Path(raw).resolve() / "app"
+            files = {
+                "pubspec.yaml": "name: app\n",
+                "lib/core/di/service_locator.dart": (
+                    "import '../../features/counter/counter_module.dart';\n"
+                    "import '../../features/counter/data/datasources/counter_local_datasource.dart';\n"
+                    "import '../../features/step_counter/step_counter_module.dart';\n"
+                    "Future<void> setupServiceLocator({\n"
+                    "  ICounterLocalDataSource? counterLocalDataSourceOverride,\n"
+                    "}) async {\n"
+                    "  registerCounterFeature(\n    getIt,\n    localDataSource: counterLocalDataSourceOverride,\n  );\n"
+                    "  registerStepCounterFeature(getIt);\n"
+                    "  // fgen:register-features\n}\n"
+                ),
+                "lib/core/router/app_router.dart": (
+                    "import '../../features/counter/counter_module.dart';\n"
+                    "import '../../features/step_counter/step_counter_module.dart';\n"
+                    "final r = [\n  ...counterRoutes(getIt),\n  ...stepCounterRoutes(getIt),\n];\n"
+                ),
+                "test/core/di/service_locator_test.dart": (
+                    "import 'package:app/features/counter/data/repositories/counter_repository_impl.dart';\n"
+                    "import 'package:app/features/step_counter/data/repositories/step_counter_repository_impl.dart';\n"
+                    "void main() {\n  expect(getIt<ICounterRepository>(), isA<CounterRepository>());\n"
+                    "  expect(getIt<IStepCounterRepository>(), isA<StepCounterRepository>());\n}\n"
+                ),
+                "lib/features/step_counter/step_counter_module.dart": "String k = l10n.reset;\n",
+                "lib/core/l10n/app_localizations_en.arb": (
+                    '{\n  "@@locale": "en",\n  "counterTitle": "Counter Demo",\n  "@counterTitle": {\n    "description": "d"\n  },\n'
+                    '  "reset": "Reset",\n  "count": "Count",\n  "keep": "Keep"\n}\n'
+                ),
+                "lib/core/l10n/app_localizations_fr.arb": (
+                    '{\n  "@@locale": "fr",\n  "counterTitle": "Demo",\n  "reset": "R",\n  "count": "C",\n  "keep": "K"\n}\n'
+                ),
+            }
+            for rel, text in files.items():
+                (app / rel).parent.mkdir(parents=True, exist_ok=True)
+                (app / rel).write_text(text)
+            env, log = fake_tool_env(app.parent)
+            outputs = []
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(REPO_ROOT / "remove_counter.sh")], cwd=str(app), env=env,
+                    capture_output=True, text=True, timeout=COMMAND_TIMEOUT,
+                )
+                self.assertEqual(result.returncode, 0, msg=fmt(result))
+                outputs.append({rel: (app / rel).read_text() for rel in files})
+            self.assertEqual(outputs[0], outputs[1])
+            locator = (app / "lib/core/di/service_locator.dart").read_text()
+            self.assertIn("step_counter_module.dart", locator)
+            self.assertIn("registerStepCounterFeature(getIt);", locator)
+            self.assertNotIn("features/counter/", locator)
+            self.assertNotIn("registerCounterFeature", locator)
+            self.assertNotIn("counterLocalDataSourceOverride", locator)
+            router = (app / "lib/core/router/app_router.dart").read_text()
+            self.assertIn("stepCounterRoutes(getIt)", router)
+            self.assertNotIn("counterRoutes(getIt),\n  ...step", router)
+            self.assertNotIn("features/counter/", router)
+            smoke = (app / "test/core/di/service_locator_test.dart").read_text()
+            self.assertIn("IStepCounterRepository", smoke)
+            self.assertNotIn("ICounterRepository", smoke)
+            en = json.loads((app / "lib/core/l10n/app_localizations_en.arb").read_text())
+            fr = json.loads((app / "lib/core/l10n/app_localizations_fr.arb").read_text())
+            self.assertEqual(list(en), ["@@locale", "reset", "keep"])
+            self.assertEqual(list(fr), ["@@locale", "reset", "keep"])
+            self.assertTrue(any("gen-l10n" in inv for inv in read_invocations(log)))
 
 
 # ----------------------------------------------------------------------------------
@@ -2377,7 +3277,7 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=fmt(result))
 
     def test_30_fgen_generates_lean_feature_with_normalized_name(self) -> None:
-        """Lean default: no service, no DTO, but repository failure tests exist."""
+        """Lean default: no service, no DTO; one flow test is the feature's test."""
         result = run_fgen("mySecondFeature", cwd=self.app, timeout=SLOW_TIMEOUT)
         self.assertEqual(result.returncode, 0, msg=fmt(result))
         feature = "lib/features/my_second_feature"
@@ -2391,11 +3291,15 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
             f"{feature}/presentation/bloc/my_second_feature_cubit.dart",
             f"{feature}/presentation/bloc/my_second_feature_state.dart",
             f"{feature}/presentation/screens/my_second_feature_screen.dart",
-            f"{tests}/data/repositories/my_second_feature_repository_impl_test.dart",
-            f"{tests}/presentation/bloc/my_second_feature_cubit_test.dart",
-            f"{tests}/presentation/screens/my_second_feature_screen_test.dart",
+            f"{tests}/my_second_feature_flow_test.dart",
         ]:
             self.assertTrue((self.app / relative).exists(), msg=relative)
+        # One generated test file: the flow test (success, timeout → localized
+        # network failure, retry). No per-layer re-tests of the same paths.
+        self.assertEqual(
+            sorted(p.relative_to(self.app).as_posix() for p in (self.app / tests).rglob("*_test.dart")),
+            [f"{tests}/my_second_feature_flow_test.dart"],
+        )
         # Lean layout: the optional layers are absent.
         for relative in [
             f"{feature}/domain/services/my_second_feature_service.dart",
@@ -2431,10 +3335,10 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
             self.assertIn(needle, (self.app / wired).read_text(), msg=wired)
         self.assertTrue((self.app / f"{feature}/my_second_feature_module.dart").exists())
         self.assertTrue((self.app / f"{tests}/my_second_feature_flow_test.dart").exists())
-        cubit_test = (
-            self.app / f"{tests}/presentation/bloc/my_second_feature_cubit_test.dart"
-        ).read_text()
-        self.assertIn("package:smoke_app/", cubit_test)
+        flow_test = (self.app / f"{tests}/my_second_feature_flow_test.dart").read_text()
+        self.assertIn("package:smoke_app/", flow_test)
+        self.assertIn("TimeoutException", flow_test)
+        self.assertIn("failureNetwork", flow_test)
 
     def test_31_fgen_full_variant_generates_service_and_dto(self) -> None:
         """--with-service --with-dto: optional layers plus their tests."""
@@ -2450,11 +3354,15 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         for relative in [
             f"{feature}/domain/services/my_third_feature_service.dart",
             f"{feature}/data/models/my_third_feature_dto.dart",
-            f"{tests}/domain/services/my_third_feature_service_test.dart",
-            f"{tests}/data/models/my_third_feature_dto_test.dart",
-            f"{tests}/data/repositories/my_third_feature_repository_impl_test.dart",
         ]:
             self.assertTrue((self.app / relative).exists(), msg=relative)
+        # Flow test plus the DTO mapping test (real logic); no forwarding
+        # service test, no per-layer re-tests.
+        self.assertEqual(
+            sorted(p.relative_to(self.app).as_posix() for p in (self.app / tests).rglob("*_test.dart")),
+            [f"{tests}/data/models/my_third_feature_dto_test.dart",
+             f"{tests}/my_third_feature_flow_test.dart"],
+        )
         service = (self.app / f"{feature}/domain/services/my_third_feature_service.dart").read_text()
         self.assertIn("PLACEHOLDER", service)
         # The full cubit depends on the service seam.
@@ -2478,12 +3386,12 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         for relative in [
             f"{feature}/data/models/fourth_feature_dto.dart",
             f"{tests}/data/models/fourth_feature_dto_test.dart",
-            f"{tests}/data/repositories/fourth_feature_repository_impl_test.dart",
+            f"{tests}/fourth_feature_flow_test.dart",
         ]:
             self.assertTrue((self.app / relative).exists(), msg=relative)
         for relative in [
             f"{feature}/domain/services/fourth_feature_service.dart",
-            f"{tests}/domain/services/fourth_feature_service_test.dart",
+            f"{tests}/data/repositories/fourth_feature_repository_impl_test.dart",
         ]:
             self.assertFalse((self.app / relative).exists(), msg=relative)
         # No service seam: the cubit still depends on the repository interface.
@@ -2514,12 +3422,14 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
         tests = "test/features/fifth_feature"
         for relative in [
             f"{feature}/domain/services/fifth_feature_service.dart",
-            f"{tests}/domain/services/fifth_feature_service_test.dart",
+            f"{tests}/fifth_feature_flow_test.dart",
         ]:
             self.assertTrue((self.app / relative).exists(), msg=relative)
         for relative in [
             f"{feature}/data/models/fifth_feature_dto.dart",
             f"{tests}/data/models/fifth_feature_dto_test.dart",
+            # A placeholder service only forwards: no forwarding test.
+            f"{tests}/domain/services/fifth_feature_service_test.dart",
         ]:
             self.assertFalse((self.app / relative).exists(), msg=relative)
         # The cubit depends on the service seam for this combination.
@@ -2543,21 +3453,40 @@ class TestGeneratedAppEndToEnd(unittest.TestCase):
 
     def test_40_fgen_rerun_preserves_edits_and_exits_nonzero(self) -> None:
         cubit = self.app / "lib/features/my_second_feature/presentation/bloc/my_second_feature_cubit.dart"
-        cubit_test = self.app / "test/features/my_second_feature/presentation/bloc/my_second_feature_cubit_test.dart"
+        flow_test = self.app / "test/features/my_second_feature/my_second_feature_flow_test.dart"
         state_file = self.app / "lib/features/my_second_feature/presentation/bloc/my_second_feature_state.dart"
         cubit_before = cubit.read_bytes()
         state_before = state_file.read_bytes()
         cubit.write_text(cubit.read_text() + "\n// user customization\n")
-        cubit_test.write_text(cubit_test.read_text() + "\n// test customization\n")
+        flow_test.write_text(flow_test.read_text() + "\n// test customization\n")
 
         result = run_fgen("mySecondFeature", cwd=self.app, timeout=SLOW_TIMEOUT)
         self.assertNotEqual(result.returncode, 0, msg=fmt(result))
         self.assertIn("already exists", result.stderr)
         self.assertIn("// user customization", cubit.read_text())
-        self.assertIn("// test customization", cubit_test.read_text())
+        self.assertIn("// test customization", flow_test.read_text())
         self.assertEqual(state_file.read_bytes(), state_before)
         # The pre-edit generated content is still recognizable (not regenerated).
         self.assertIn("class MySecondFeatureCubit", cubit_before.decode())
+
+    def test_41_fgen_refuses_names_clashing_with_imported_types(self) -> None:
+        """`image` (material_ui), `failure` (core) and `string` (dart:core) would
+        generate classes that do not compile: refused before anything is written."""
+        wiring = [
+            self.app / "lib/core/di/service_locator.dart",
+            self.app / "lib/core/router/app_router.dart",
+            self.app / "lib/core/router/route_constants.dart",
+        ]
+        before = [path.read_bytes() for path in wiring]
+        for name, clash in (("image", "Image"), ("failure", "Failure"), ("string", "String")):
+            with self.subTest(name=name):
+                result = run_fgen(name, cwd=self.app, timeout=SLOW_TIMEOUT)
+                self.assertNotEqual(result.returncode, 0, msg=fmt(result))
+                self.assertIn(clash, result.stderr)
+                self.assertFalse((self.app / "lib" / "features" / name).exists())
+                self.assertFalse((self.app / "test" / "features" / name).exists())
+        self.assertEqual([path.read_bytes() for path in wiring], before)
+        self.assertEqual(list((self.app / "lib").glob("fgen_name_probe_*.dart")), [])
 
     # -- Full-workflow step 3: apply the printed DI/route wiring, prove it -------
 

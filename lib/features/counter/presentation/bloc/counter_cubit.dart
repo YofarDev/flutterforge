@@ -60,7 +60,7 @@ class CounterCubit extends Cubit<CounterState> {
   }
 
   int _applyDecrement(CounterSettings settings) {
-    return state.count - settings.stepSize;
+    return _counterService.applyStepSizeDown(state.count, settings);
   }
 
   void _updateCount(int newValue, CounterSettings settings) {

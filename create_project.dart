@@ -128,6 +128,7 @@ const List<String> requiredTemplatePaths = <String>[
   'lib',
   'test',
   'analysis_options.yaml',
+  'build.yaml',
   'packages_to_add.json',
   'l10n.yaml',
   'template-gitignore',
@@ -142,7 +143,8 @@ const List<String> requiredTemplatePaths = <String>[
 /// must be added here.
 ///
 /// Categories (see README.md "Shipped tooling"):
-/// - standard app tools: `fverify`, `fgen`, `fstr`, `fl10n`;
+/// - standard app tools: `fverify`, `ftest` (with the machine-wide queue
+///   helper `fqueue`, sourced by both), `fgen`, `fstr`, `fl10n`;
 /// - included advisory/optional tools: `fanal`, repaired `fimp`, advisory
 ///   `fdead`, `fcheck`, explicit `sync_skills`.
 ///
@@ -154,6 +156,8 @@ const List<String> requiredTemplatePaths = <String>[
 /// `flutter_analyze_interceptor.py` was deleted from the template.
 const List<String> shippedScripts = <String>[
   'scripts/fverify.sh',
+  'scripts/ftest.sh',
+  'scripts/fqueue.sh',
   'scripts/fgen.sh',
   'scripts/fstr.sh',
   'scripts/fl10n.sh',
@@ -184,16 +188,7 @@ const List<String> shippedScriptAssets = <String>[
   'scripts/feature_templates/state.dart.tpl',
   'scripts/feature_templates/cubit.dart.tpl',
   'scripts/feature_templates/screen.dart.tpl',
-  'scripts/feature_templates/repository_test_imports.dart.tpl',
-  'scripts/feature_templates/repository_test_dto_import.dart.tpl',
-  'scripts/feature_templates/repository_test_setup.dart.tpl',
-  'scripts/feature_templates/repository_test_dto_result.dart.tpl',
-  'scripts/feature_templates/repository_test_domain_result.dart.tpl',
-  'scripts/feature_templates/repository_test_body.dart.tpl',
   'scripts/feature_templates/dto_test.dart.tpl',
-  'scripts/feature_templates/service_test.dart.tpl',
-  'scripts/feature_templates/cubit_test.dart.tpl',
-  'scripts/feature_templates/screen_test.dart.tpl',
 ];
 
 final RegExp packageNamePattern = RegExp(r'^[a-z][a-z0-9_]*$');
@@ -273,7 +268,7 @@ void printUsage() {
 }
 
 void main(List<String> args) async {
-  if (args.isEmpty || args.contains('--help') || args.contains('-h')) {
+  if (args.isEmpty) {
     printUsage();
     return;
   }
@@ -283,7 +278,11 @@ void main(List<String> args) async {
   String? publishedPath;
 
   try {
-    final ParsedArguments parsed = parseArguments(args);
+    final ParsedArguments? parsed = parseArguments(args);
+    if (parsed == null) {
+      printUsage();
+      return;
+    }
 
     final String templateRoot = resolveTemplateRoot();
     validateTemplate(templateRoot);
@@ -293,9 +292,12 @@ void main(List<String> args) async {
       parsed.destination,
       originalDirectory,
     );
-    final String destinationName = finalComponent(parsed.destination);
+    // From the normalized path: a trailing slash ("my_app/") still names
+    // the directory "my_app".
+    final String destinationName = finalComponent(destination);
     final String packageName = parsed.packageName ?? destinationName;
     validatePackageName(packageName);
+    validatePackageNameIsNotADependency(packageName, templateRoot);
 
     preflightDestination(destination, templateRoot);
 
@@ -352,6 +354,7 @@ void main(List<String> args) async {
       );
     }
     Directory(stagingPath).renameSync(destination);
+    final String stagedAt = stagingPath;
     publishedPath = destination;
     stagingPath = null;
     Directory.current = publishedPath;
@@ -359,6 +362,7 @@ void main(List<String> args) async {
     // The directory moved: refresh path-dependent metadata at the final path.
     stdout.writeln('🔁 Refreshing package resolution at the final path...');
     await runCommand('flutter', <String>['pub', 'get']);
+    rewriteStagingPathReferences(stagedAt, destination);
 
     stdout.writeln('✅ Project setup complete! Published to: $publishedPath');
 
@@ -375,23 +379,34 @@ void main(List<String> args) async {
       }
     }
   } on FailureException catch (failure) {
-    stderr.writeln('Error: ${failure.message}');
-    if (stagingPath != null) {
-      stderr.writeln(
-        'The staging directory was kept for diagnosis: $stagingPath',
-      );
-      stderr.writeln('Delete it manually once you no longer need it.');
-    }
-    if (publishedPath != null) {
-      stderr.writeln('The generated project was kept at: $publishedPath');
-    }
+    reportFailure(failure.message, stagingPath, publishedPath);
     exit(failure.exitCode);
+  } catch (error, stackTrace) {
+    // Anything else (a missing tool, a permission error...) takes the same
+    // documented path: message, kept staging directory, non-zero exit.
+    reportFailure('unexpected failure: $error', stagingPath, publishedPath);
+    stderr.writeln(stackTrace);
+    exit(1);
+  }
+}
+
+void reportFailure(String message, String? stagingPath, String? publishedPath) {
+  stderr.writeln('Error: $message');
+  if (stagingPath != null) {
+    stderr.writeln(
+      'The staging directory was kept for diagnosis: $stagingPath',
+    );
+    stderr.writeln('Delete it manually once you no longer need it.');
+  }
+  if (publishedPath != null) {
+    stderr.writeln('The generated project was kept at: $publishedPath');
   }
 }
 
 /// Parses arguments deterministically. Throws [FailureException] on ambiguous
-/// or invalid input, before anything is invoked.
-ParsedArguments parseArguments(List<String> args) {
+/// or invalid input, before anything is invoked. Returns null when help was
+/// requested (`-h`/`--help` in an option position, never as an option value).
+ParsedArguments? parseArguments(List<String> args) {
   String? destination;
   String org = defaultOrg;
   String? packageName;
@@ -399,6 +414,7 @@ ParsedArguments parseArguments(List<String> args) {
   bool openInVsCode = true;
   bool optionsEnded = false;
   final List<String> forwardedArguments = <String>[];
+  final Set<String> consumedOptions = <String>{};
 
   void addPositional(String argument) {
     if (destination != null) {
@@ -420,6 +436,9 @@ ParsedArguments parseArguments(List<String> args) {
     if (argument == '--') {
       optionsEnded = true;
       continue;
+    }
+    if (argument == '-h' || argument == '--help') {
+      return null;
     }
     if (argument == '--no-open') {
       openInVsCode = false;
@@ -449,6 +468,16 @@ ParsedArguments parseArguments(List<String> args) {
       }
       if (value.isEmpty) {
         throw FailureException("Option '$flag' requires a non-empty value.");
+      }
+      if (const <String>{
+            '--org',
+            '--project-name',
+            '--description',
+          }.contains(flag) &&
+          !consumedOptions.add(flag)) {
+        throw FailureException(
+          "Option '$flag' was given more than once; pass it exactly once.",
+        );
       }
       switch (flag) {
         case '--org':
@@ -616,6 +645,31 @@ void validatePackageName(String name) {
   }
 }
 
+/// Packages the generated app depends on, plus the SDK packages it uses. An
+/// app package with one of these names cannot depend on it ("X depends on X"),
+/// which would only fail minutes later in `flutter pub add`.
+void validatePackageNameIsNotADependency(String name, String templateRoot) {
+  final Map<String, dynamic> packages = jsonDecode(
+    File('$templateRoot/packages_to_add.json').readAsStringSync(),
+  ) as Map<String, dynamic>;
+  final Set<String> taken = <String>{
+    'flutter',
+    'flutter_test',
+    'flutter_localizations',
+    'intl',
+    for (final String section in <String>['dependencies', 'dev_dependencies'])
+      for (final dynamic spec
+          in (packages[section] as List<dynamic>? ?? <dynamic>[]))
+        (spec as String).split(':').first,
+  };
+  if (taken.contains(name)) {
+    throw FailureException(
+      '"$name" is the name of a package the generated app depends on, so the '
+      'app cannot use it. Pass --project-name=<name> to choose another name.',
+    );
+  }
+}
+
 /// Refuses unsafe destinations before `flutter create` is ever invoked.
 /// Never deletes or modifies the existing target.
 void preflightDestination(String destination, String templateRoot) {
@@ -630,6 +684,13 @@ void preflightDestination(String destination, String templateRoot) {
   if (candidate == templateRoot) {
     throw FailureException(
       'Refusing to use the template root ("$templateRoot") itself as the destination.',
+    );
+  }
+  if (candidate.startsWith('$templateRoot/')) {
+    throw FailureException(
+      'Refusing to create the project inside the template checkout '
+      '("$templateRoot"): the app would become untracked template content. '
+      'Choose a destination outside it, e.g. ../${finalComponent(destination)}.',
     );
   }
   if (FileSystemEntity.isLinkSync(destination)) {
@@ -751,6 +812,11 @@ Future<void> copyTemplateAssets(String templateRoot) async {
 
   stdout.writeln("⚙️  Copying 'analysis_options.yaml'...");
   File('$templateRoot/analysis_options.yaml').copySync('analysis_options.yaml');
+
+  // Code generation scope (freezed/json_serializable only where annotated
+  // classes live): copied before build_runner runs in staging.
+  stdout.writeln("⚙️  Copying 'build.yaml'...");
+  File('$templateRoot/build.yaml').copySync('build.yaml');
 
   // The generated app carries its OWN standalone quality workflow — never a
   // reference to this repository's template-verification harness.
@@ -890,36 +956,71 @@ Future<void> addPackages(String templateRoot) async {
 /// The flutterforge-upgrade skill reads it as the merge base for the next
 /// template upgrade. `templateDirty` warns that uncommitted template changes
 /// were shipped too, so the commit alone does not reproduce them. Skipped
-/// (with a warning) when the template is not a git checkout.
+/// (with a warning) when the template is not its own git checkout or git is
+/// missing.
 void writeTemplateStamp(String templateRoot) {
-  final ProcessResult head = Process.runSync('git', <String>[
-    '-C',
-    templateRoot,
-    'rev-parse',
-    'HEAD',
-  ]);
-  if (head.exitCode != 0) {
+  String? git(List<String> arguments) {
+    try {
+      final ProcessResult result = Process.runSync('git', <String>[
+        '-C',
+        templateRoot,
+        ...arguments,
+      ]);
+      return result.exitCode == 0 ? (result.stdout as String).trim() : null;
+    } on ProcessException {
+      return null; // git is not installed
+    }
+  }
+
+  // The template must be its OWN repository: a template vendored inside
+  // another repository would otherwise record that repository's HEAD.
+  final String? topLevel = git(<String>['rev-parse', '--show-toplevel']);
+  final String? head = git(<String>['rev-parse', 'HEAD']);
+  final bool ownCheckout =
+      topLevel != null &&
+      Directory(topLevel).resolveSymbolicLinksSync() == templateRoot;
+  if (head == null || !ownCheckout) {
     stderr.writeln(
-      '⚠️  Warning: template is not a git checkout; .flutterforge.json not written. '
-      'Future upgrades will detect the base by file matching instead.',
+      '⚠️  Warning: the template is not its own git checkout (or git is not '
+      'installed); .flutterforge.json not written. Future upgrades will detect '
+      'the base by file matching instead.',
     );
     return;
   }
-  final ProcessResult status = Process.runSync('git', <String>[
-    '-C',
-    templateRoot,
-    'status',
-    '--porcelain',
-    '--untracked-files=no',
-  ]);
+  // Untracked files count too: a new, uncommitted script that ships would
+  // otherwise leave the stamp claiming a clean commit.
+  final String status = git(<String>['status', '--porcelain']) ?? '';
   final Map<String, Object> stamp = <String, Object>{
-    'templateCommit': (head.stdout as String).trim(),
-    'templateDirty': (status.stdout as String).trim().isNotEmpty,
+    'templateCommit': head,
+    'templateDirty': status.isNotEmpty,
     'createdAt': DateTime.now().toIso8601String().substring(0, 10),
   };
   File(
     '.flutterforge.json',
   ).writeAsStringSync('${const JsonEncoder.withIndent('  ').convert(stamp)}\n');
+}
+
+/// `flutter create` and `pub get` ran inside the staging directory, and the
+/// final `pub get` does not regenerate the native build settings, which still
+/// name the staging path (e.g. FLUTTER_APPLICATION_PATH). Point them at the
+/// published path so an Xcode build before the first `flutter run` works.
+void rewriteStagingPathReferences(String stagingPath, String destination) {
+  const List<String> files = <String>[
+    'ios/Flutter/Generated.xcconfig',
+    'ios/Flutter/flutter_export_environment.sh',
+    'macos/Flutter/ephemeral/Flutter-Generated.xcconfig',
+    'macos/Flutter/ephemeral/flutter_export_environment.sh',
+  ];
+  for (final String relativePath in files) {
+    final File file = File('$destination/$relativePath');
+    if (!file.existsSync()) {
+      continue;
+    }
+    final String content = file.readAsStringSync();
+    if (content.contains(stagingPath)) {
+      file.writeAsStringSync(content.replaceAll(stagingPath, destination));
+    }
+  }
 }
 
 /// Writes README.md from the template with the project name substituted.

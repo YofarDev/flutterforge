@@ -5,6 +5,7 @@
 /// the analyzer retains per-process state across fixture runs, and a fresh
 /// isolate per test file keeps these checks independent of whatever state
 /// earlier fixture-heavy files leave behind.
+@Timeout(Duration(minutes: 3))
 library;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -234,6 +235,35 @@ class AlphaModel {
           );
         },
       );
+    }
+
+    for (final String uri in <String>[
+      'dart:ui',
+      'package:flutter_bloc/flutter_bloc.dart',
+      'package:bloc/bloc.dart',
+      'package:go_router/go_router.dart',
+    ]) {
+      test('rejected: $uri re-exported through a core barrel', () async {
+        final CheckerResult result = await ArchitectureChecker.checkSources(
+          fixtureWith(<String, String>{
+            'lib/core/bridge.dart': "export '$uri';\n",
+            'lib/features/alpha/domain/models/alpha_model.dart': '''
+import '../../../../core/bridge.dart';
+
+class AlphaModel {
+  const AlphaModel(this.id);
+  final String id;
+}
+''',
+          }),
+        );
+        expect(result.errors, isEmpty);
+        expect(
+          result.violations.map((ArchitectureViolation v) => v.ruleId),
+          contains('domain-purity'),
+          reason: '$uri must be caught in the re-export chain',
+        );
+      });
     }
 
     test('rejected: material exported by a generated library', () async {
@@ -519,6 +549,119 @@ export 'models/failure.dart';
         }),
         'a domain import of a pure barrel stays clean even though the app '
         'has UI files elsewhere',
+      );
+    });
+  });
+
+  group('file locations and feature modules', () {
+    /// A feature module that also exposes a locator: only the app-wide
+    /// composition roots may import it, or anything could resolve through it.
+    const String alphaModule = '''
+import 'package:get_it/get_it.dart';
+
+final GetIt alphaLocator = GetIt.instance;
+
+void registerAlphaFeature(GetIt getIt) {}
+''';
+
+    test(
+      'rejected: a lib/shared/ file re-exporting feature internals',
+      () async {
+        await expectViolation(
+          fixtureWith(<String, String>{
+            'lib/shared/bridge.dart': '''
+export '../features/alpha/data/repositories/alpha_repository_impl.dart';
+''',
+          }),
+          'core-imports-feature',
+          'lib/shared/ is infrastructure like lib/core/, not a rule-free zone',
+        );
+      },
+    );
+
+    test('rejected: an extra file at a feature root', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/alpha_internal.dart': '''
+export 'data/datasources/alpha_remote_datasource.dart';
+''',
+        }),
+        'unclassified-location',
+        'alpha_internal.dart beside the barrel and module',
+      );
+    });
+
+    test(
+      'rejected: a feature folder outside data/domain/presentation',
+      () async {
+        await expectViolation(
+          fixtureWith(<String, String>{
+            'lib/features/alpha/services/alpha_helper.dart': '''
+class AlphaHelper {}
+''',
+          }),
+          'unclassified-location',
+          'features/alpha/services/ has no layer',
+        );
+      },
+    );
+
+    test('rejected: a file directly in lib/features/', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/shared.dart': '''
+export 'beta/presentation/beta_screen.dart';
+''',
+        }),
+        'unclassified-location',
+        'lib/features/shared.dart',
+      );
+    });
+
+    test('rejected: presentation importing its own feature module', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/alpha_module.dart': alphaModule,
+          'lib/features/alpha/presentation/screens/uses_module.dart': '''
+import '../../alpha_module.dart';
+
+final Object locator = alphaLocator;
+''',
+        }),
+        'module-import',
+        'presentation reaching the locator through alpha_module.dart',
+      );
+    });
+
+    test('rejected: domain importing its own feature module', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/alpha_module.dart': alphaModule,
+          'lib/features/alpha/domain/services/uses_module.dart': '''
+import '../../alpha_module.dart';
+
+final Object locator = alphaLocator;
+''',
+        }),
+        'module-import',
+        'domain reaching the locator through alpha_module.dart',
+      );
+    });
+
+    test('accepted: the service locator imports a feature module, and a '
+        'lib/shared/ file holds pure infrastructure', () async {
+      await expectClean(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/alpha_module.dart': alphaModule,
+          'lib/core/di/service_locator.dart': withImport(
+            fixtureApp['lib/core/di/service_locator.dart']!,
+            "import '../../features/alpha/alpha_module.dart';",
+          ),
+          'lib/shared/formatting.dart': '''
+String shout(String value) => value.toUpperCase();
+''',
+        }),
+        'module imported by its composition root; rule-abiding lib/shared/',
       );
     });
   });

@@ -126,11 +126,5 @@ void main() {
 
       expect(fakeHomeCubit.refreshCalls, 1);
     });
-
-    testWidgets('displays Home title', (WidgetTester tester) async {
-      await tester.pumpWidget(buildTestableWidget(const HomeScreen()));
-
-      expect(find.text('Home'), findsOneWidget);
-    });
   });
 }

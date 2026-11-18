@@ -1,3 +1,8 @@
+@Timeout(Duration(minutes: 3))
+library;
+
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/architecture_checker.dart';
@@ -5,38 +10,15 @@ import 'support/checker_expectations.dart';
 import 'support/fixture_app.dart';
 
 void main() {
-  Future<void> expectClean(
-    Map<String, String> sources,
-    String description,
-  ) async {
-    final CheckerResult result = await ArchitectureChecker.checkSources(
-      sources,
-    );
-    expect(
-      result.isClean,
-      isTrue,
-      reason:
-          '$description should pass, but got: '
-          '${result.violations} ${result.errors}',
-    );
-  }
-
-  Future<void> expectViolation(
-    Map<String, String> sources,
-    String ruleId,
-    String description,
-  ) async {
-    final CheckerResult result = await ArchitectureChecker.checkSources(
-      sources,
-    );
-    expect(
-      result.violations.map(
-        (ArchitectureViolation violation) => violation.ruleId,
-      ),
-      contains(ruleId),
-      reason: '$description should violate $ruleId, got: ${result.violations}',
-    );
-  }
+  group('plain Dart VM', () {
+    test('checker runs under `dart run` (normalized SDK path)', () async {
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        'test/checker_selftest/support/plain_vm_check.dart',
+      ]);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    });
+  });
 
   group('base fixture', () {
     test(
@@ -118,6 +100,28 @@ class AlphaDto {
   });
 
   group('domain purity', () {
+    for (final String uri in <String>[
+      'dart:ui',
+      'package:flutter_bloc/flutter_bloc.dart',
+      'package:bloc/bloc.dart',
+      'package:go_router/go_router.dart',
+    ]) {
+      test('domain importing $uri is rejected', () async {
+        await expectDomainForbidden("import '$uri';");
+      });
+
+      test('public barrel exporting $uri is rejected', () async {
+        await expectViolation(
+          fixtureWith(<String, String>{
+            'lib/features/alpha/alpha.dart':
+                "${fixtureApp['lib/features/alpha/alpha.dart']!}export '$uri';\n",
+          }),
+          'domain-purity',
+          'public barrel exporting $uri',
+        );
+      });
+    }
+
     test('domain importing flutter/material is rejected', () async {
       await expectViolation(
         fixtureWith(<String, String>{
@@ -290,6 +294,7 @@ export 'domain/contracts/beta_contract.dart';
         fixtureWith(<String, String>{
           'lib/features/beta/beta.dart': '''
 export 'domain/models/beta_model.dart';
+export 'domain/contracts/beta_contract.dart';
 export 'data/beta_repository.dart';
 ''',
         }),
@@ -305,6 +310,7 @@ export 'data/beta_repository.dart';
           fixtureWith(<String, String>{
             'lib/features/beta/beta.dart': '''
 export 'domain/models/beta_model.dart';
+export 'domain/contracts/beta_contract.dart';
 export 'domain/models/beta_model.dart' show BetaModel;
 export 'domain/leak.dart';
 ''',
@@ -324,6 +330,7 @@ export '../data/beta_repository.dart';
         await expectViolation(
           fixtureWith(<String, String>{
             'lib/features/beta/beta.dart': '''
+export 'domain/contracts/beta_contract.dart';
 export 'domain/models/beta_model.dart'
     if (dart.library.io) 'data/beta_repository.dart';
 ''',
@@ -385,6 +392,52 @@ export 'domain/contracts/beta_contract.dart';
   });
 
   group('part and part-of relationships', () {
+    test('rejected: a data library including a domain part file', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/data/alpha_cache.dart': '''
+part '../domain/models/ui_part.dart';
+
+class AlphaCache {
+  const AlphaCache();
+}
+''',
+          'lib/features/alpha/domain/models/ui_part.dart': '''
+part of '../../data/alpha_cache.dart';
+
+class UiPart {
+  const UiPart();
+}
+''',
+        }),
+        'part-location',
+        'part file living in another layer than its library',
+      );
+    });
+
+    test('rejected: a part file in another feature than its library', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/domain/models/alpha_holder.dart': '''
+part '../../../beta/domain/models/beta_part.dart';
+
+class AlphaHolder {
+  const AlphaHolder();
+}
+''',
+          'lib/features/beta/domain/models/beta_part.dart': '''
+part of '../../../alpha/domain/models/alpha_holder.dart';
+
+class BetaPart {
+  const BetaPart();
+}
+''',
+        }),
+        'part-location',
+        'part file living in another feature than its library',
+      );
+    });
+
     test('rejected: domain library including a data file through part', () async {
       await expectViolation(
         fixtureWith(<String, String>{
@@ -478,12 +531,21 @@ AlphaCubit placeholder() => AlphaCubit(AlphaService(PlaceholderRepository()));
 
 class PlaceholderRepository implements IAlphaRepository {
   @override
-  Future<Either<Failure, AlphaModel>> fetch() async => Right(Failure('x'));
+  Future<Either<Failure, AlphaModel>> fetch() async =>
+      Right<Failure, AlphaModel>(const AlphaModel('x'));
 }
 
 AlphaCubit placeholder2() => placeholder();
 
-class AlphaState2 {}
+class AlphaState2 {
+  const AlphaState2();
+}
+
+class CustomBase extends BlocBase<int> {
+  CustomBase() : super(0);
+}
+
+extension type CubitHandle(AlphaCubit cubit) {}
 
 class AlphaInitial2 extends AlphaState2 {
   const AlphaInitial2();
@@ -524,6 +586,166 @@ class AlphaInitial2 extends AlphaState2 {
       await expectStoredCubit(
         'List<AlphaCubit> _others = <AlphaCubit>[];',
         'container cubit field',
+      );
+    });
+
+    test('bloc-family base types are rejected (BlocBase, StateStreamable, '
+        'StateStreamableSource, Emittable, custom BlocBase subtype)', () async {
+      await expectStoredCubit('BlocBase<int>? _other;', 'BlocBase field');
+      await expectStoredCubit(
+        'StateStreamable<int>? _other;',
+        'StateStreamable field',
+      );
+      await expectStoredCubit(
+        'StateStreamableSource<int>? _other;',
+        'StateStreamableSource field',
+      );
+      await expectStoredCubit('Emittable<int>? _other;', 'Emittable field');
+      await expectStoredCubit(
+        'CustomBase? _other;',
+        'direct BlocBase subtype that is neither Cubit nor Bloc',
+      );
+    });
+
+    test('record containing a cubit is rejected', () async {
+      await expectStoredCubit(
+        '(AlphaCubit, int)? _other;',
+        'positional record',
+      );
+      await expectStoredCubit(
+        '({AlphaCubit cubit, int count})? _other;',
+        'named record',
+      );
+    });
+
+    test('stored cubit factory (function type returning a cubit) is '
+        'rejected', () async {
+      await expectStoredCubit(
+        'AlphaCubit Function()? _other;',
+        'cubit factory',
+      );
+      await expectStoredCubit(
+        'Future<AlphaCubit> Function()? _other;',
+        'async cubit factory',
+      );
+    });
+
+    test('extension type erasing to a cubit is rejected', () async {
+      await expectStoredCubit('CubitHandle? _other;', 'extension type field');
+    });
+
+    group('freezed factory parameters', () {
+      Map<String, String> freezedFixture(String parameter) =>
+          fixtureWith(<String, String>{
+            'lib/features/alpha/presentation/bloc/alpha_form.dart':
+                '''
+import 'package:freezed_annotation/freezed_annotation.dart';
+
+import 'alpha_cubit.dart';
+
+part 'alpha_form.freezed.dart';
+
+@freezed
+abstract class AlphaForm with _\$AlphaForm {
+  const factory AlphaForm({$parameter}) = _AlphaForm;
+}
+''',
+            'lib/features/alpha/presentation/bloc/alpha_form.freezed.dart': '''
+part of 'alpha_form.dart';
+
+mixin _\$AlphaForm {}
+
+class _AlphaForm implements AlphaForm {
+  const _AlphaForm({this.name, this.cubit});
+  final Object? name;
+  final Object? cubit;
+}
+''',
+          });
+
+      test('rejected: a cubit parameter of the redirecting factory', () async {
+        await expectViolation(
+          freezedFixture('String? name, AlphaCubit? cubit'),
+          'stored-cubit',
+          'freezed class holding a cubit',
+        );
+      });
+
+      test('accepted: a freezed class without cubit parameters', () async {
+        await expectClean(
+          freezedFixture('String? name, int? cubit'),
+          'freezed class with plain parameters',
+        );
+      });
+    });
+
+    test('accepted: widgets and State objects may store a cubit received '
+        'through their constructor', () async {
+      await expectClean(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/presentation/widgets/alpha_dialog.dart': '''
+import 'package:material_ui/material_ui.dart';
+
+import '../bloc/alpha_cubit.dart';
+
+class AlphaDialog extends StatelessWidget {
+  const AlphaDialog({super.key, required this.cubit, required this.create});
+
+  final AlphaCubit cubit;
+  final AlphaCubit Function() create;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+class AlphaPage extends StatefulWidget {
+  const AlphaPage({super.key, required this.cubit});
+
+  final AlphaCubit cubit;
+
+  @override
+  State<AlphaPage> createState() => _AlphaPageState();
+}
+
+class _AlphaPageState extends State<AlphaPage> {
+  AlphaCubit? _cached;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+''',
+        }),
+        'widget and State fields holding a cubit',
+      );
+    });
+
+    test('rejected: a non-widget class next to a widget still cannot store a '
+        'cubit', () async {
+      await expectViolation(
+        fixtureWith(<String, String>{
+          'lib/features/alpha/presentation/widgets/alpha_dialog.dart': '''
+import 'package:material_ui/material_ui.dart';
+
+import '../bloc/alpha_cubit.dart';
+
+class AlphaDialog extends StatelessWidget {
+  const AlphaDialog({super.key, required this.cubit});
+
+  final AlphaCubit cubit;
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+class AlphaHelper {
+  AlphaHelper(this.cubit);
+
+  final AlphaCubit cubit;
+}
+''',
+        }),
+        'stored-cubit',
+        'plain helper class in a widget file',
       );
     });
 
@@ -615,7 +837,7 @@ class MirrorCubit extends Cubit<AlphaState3> {
         fixtureWith(<String, String>{
           'lib/features/alpha/domain/services/alpha_service.dart': getItFixture(
             "import 'package:get_it/get_it.dart';",
-            'final AlphaService self = getIt<AlphaService>();',
+            'final AlphaService self = GetIt.instance<AlphaService>();',
           ),
         }),
         'locator-access',
@@ -708,7 +930,9 @@ class AlphaService {
     test('rejected: registration outside service_locator.dart', () async {
       final String routerWithDataSource = withImport(
         fixtureApp['lib/core/router/app_router.dart']!,
-        "import '../../features/alpha/data/datasources/alpha_remote_datasource.dart';",
+        "import '../../features/alpha/data/datasources/alpha_remote_datasource.dart';\n"
+        "import '../../features/alpha/data/repositories/alpha_repository_impl.dart';\n"
+        "import '../../features/alpha/domain/services/alpha_service.dart';",
       );
       await expectViolation(
         fixtureWith(<String, String>{
@@ -810,11 +1034,14 @@ import 'package:material_ui/material_ui.dart';
 import 'app.dart';
 import 'core/di/service_locator.dart';
 import 'features/alpha/presentation/bloc/alpha_cubit.dart';
+import 'features/alpha/domain/repositories/i_alpha_repository.dart';
 import 'features/alpha/domain/services/alpha_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  getIt.registerFactory<AlphaCubit>(() => AlphaCubit(AlphaService(getIt(null))));
+  getIt.registerFactory<AlphaCubit>(
+    () => AlphaCubit(AlphaService(getIt<IAlphaRepository>())),
+  );
   await setupServiceLocator();
   runApp(const MyApp());
 }
@@ -822,6 +1049,51 @@ Future<void> main() async {
         }),
         'registration-outside-di',
         'registration in main.dart',
+      );
+    });
+
+    test('rejected: main.dart registration reports the locator once, not the '
+        'method name too', () async {
+      final CheckerResult result = await ArchitectureChecker.checkSources(
+        fixtureWith(<String, String>{
+          'lib/main.dart': '''
+import 'package:material_ui/material_ui.dart';
+
+import 'app.dart';
+import 'core/di/service_locator.dart';
+import 'features/alpha/presentation/bloc/alpha_cubit.dart';
+import 'features/alpha/domain/repositories/i_alpha_repository.dart';
+import 'features/alpha/domain/services/alpha_service.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  getIt.registerFactory<AlphaCubit>(
+    () => AlphaCubit(AlphaService(getIt<IAlphaRepository>())),
+  );
+  await setupServiceLocator();
+  runApp(const MyApp());
+}
+''',
+        }),
+      );
+      expect(result.errors, isEmpty);
+      final List<String> locatorFindings = result.violations
+          .where((ArchitectureViolation v) => v.ruleId == 'locator-access')
+          .map((ArchitectureViolation v) => v.explanation)
+          .toList();
+      expect(locatorFindings, isNotEmpty);
+      expect(
+        locatorFindings.where(
+          (String text) => text.contains('registerFactory'),
+        ),
+        isEmpty,
+        reason:
+            'the get_it method name is not a finding of its own: '
+            '$locatorFindings',
+      );
+      expect(
+        result.violations.map((ArchitectureViolation v) => v.ruleId),
+        contains('registration-outside-di'),
       );
     });
 
@@ -844,6 +1116,29 @@ class ExampleService {
   });
 
   group('syntax and resolution handling', () {
+    /// A file URI of a real, resolvable library (the checker under test).
+    final String fileUri = Directory.current.uri
+        .resolve('test/support/architecture_checker.dart')
+        .toString();
+
+    for (final String directive in <String>['import', 'export']) {
+      test('file: URI in an $directive fails closed', () async {
+        final CheckerResult result = await ArchitectureChecker.checkSources(
+          fixtureWith(<String, String>{
+            'lib/features/alpha/domain/models/alpha_model.dart':
+                "$directive '$fileUri';\n"
+                '${fixtureApp['lib/features/alpha/domain/models/alpha_model.dart']!}',
+          }),
+        );
+        expect(result.errors, isNotEmpty, reason: 'file: URI must be an error');
+        expect(
+          result.errors.map((CheckerError error) => error.message),
+          contains(contains("'file:'")),
+        );
+        expect(result.isClean, isFalse);
+      });
+    }
+
     test('conditional imports are inspected on every branch', () async {
       await expectViolation(
         fixtureWith(<String, String>{

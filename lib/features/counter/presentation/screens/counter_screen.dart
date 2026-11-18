@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../../core/l10n/generated/app_localizations.dart';
+import '../../../../core/router/route_constants.dart';
 import '../bloc/counter_cubit.dart';
 import '../bloc/counter_state.dart';
 
@@ -27,7 +28,10 @@ class CounterView extends StatelessWidget {
         title: Text(l10n.counterTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          // Opened from a deep link there is nothing to pop: go home instead
+          // (go_router throws when popping an empty stack).
+          onPressed: () =>
+              context.canPop() ? context.pop() : context.go(Routes.home),
           tooltip: l10n.commonBack,
         ),
       ),

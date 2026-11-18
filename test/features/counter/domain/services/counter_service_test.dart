@@ -81,5 +81,14 @@ void main() {
         expect(service.applyStepSize(5, settings), 6);
       });
     });
+
+    group('applyStepSizeDown', () {
+      test('subtracts stepSize from value', () {
+        const CounterSettings settings = CounterSettings(stepSize: 5);
+
+        expect(service.applyStepSizeDown(10, settings), 5);
+        expect(service.applyStepSizeDown(0, settings), -5);
+      });
+    });
   });
 }

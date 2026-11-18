@@ -43,6 +43,7 @@ FILE_MAP = {
     "AGENTS.md": "AGENTS.md",
     "remove_counter.sh": "remove_counter.sh",
     "analysis_options.yaml": "analysis_options.yaml",
+    "build.yaml": "build.yaml",
     "l10n.yaml": "l10n.yaml",
     "template-README.md": "README.md",
     "templates/github/workflows/flutter-ci.yml": ".github/workflows/flutter-ci.yml",
@@ -93,15 +94,30 @@ def shipped_map(template: Path, rev: str) -> dict[str, str]:
     return mapping
 
 
-def render(path: str, raw: bytes, package: str) -> bytes:
-    """Applies the generator's substitutions to one shipped file."""
+# Mirrors create_project.dart: the package placeholder is replaced only in
+# these extensions under these app paths (placeholderRoots).
+PLACEHOLDER_ROOTS = ("lib", "test", "scripts", ".agents", ".codex", "AGENTS.md",
+                     "README.md", "analysis_options.yaml", "l10n.yaml")
+PLACEHOLDER_EXTENSIONS = (".dart", ".md", ".yaml", ".arb")
+
+
+def substitutes_placeholder(app_path: str) -> bool:
+    root = app_path.split("/", 1)[0]
+    return root in PLACEHOLDER_ROOTS and app_path.endswith(PLACEHOLDER_EXTENSIONS)
+
+
+def render(path: str, raw: bytes, package: str, app_path: str | None = None) -> bytes:
+    """Applies the generator's substitutions to one shipped file (template
+    path [path], published at [app_path])."""
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         return raw
     if path == "template-README.md":
         text = text.replace("{PROJECT_NAME}", package)
-    return text.replace(PLACEHOLDER, package).encode("utf-8")
+    if substitutes_placeholder(app_path if app_path is not None else path):
+        text = text.replace(PLACEHOLDER, package)
+    return text.encode("utf-8")
 
 
 def build_tree(template: Path, rev: str, package: str, out: Path, with_counter: bool) -> None:
@@ -114,7 +130,8 @@ def build_tree(template: Path, rev: str, package: str, out: Path, with_counter: 
                 continue
             target = out / mapping[member.name]
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(render(member.name, tar.extractfile(member).read(), package))
+            target.write_bytes(render(member.name, tar.extractfile(member).read(), package,
+                                      mapping[member.name]))
             target.chmod(member.mode & 0o777)
     if not with_counter and (out / "remove_counter.sh").exists():
         # Apply the same Counter removal the app went through, to both trees.
@@ -134,11 +151,32 @@ def blob_ids(repo: Path, paths: list[Path], normalize) -> dict[str, str]:
 
 
 def detect_base(template: Path, app: Path, package: str, head: str) -> tuple[str, str]:
+    # Both detection paths need the template's history: the stamp commit must
+    # be resolvable, and content matching scores every commit up to head. A
+    # shallow clone holds only head, so either path would silently pick head
+    # and report "Already up to date" for an app that is commits behind.
+    if git(template, "rev-parse", "--is-shallow-repository", check=False).strip() == "true":
+        sys.exit(
+            "error: the template checkout is a shallow clone, so the app's base commit "
+            "cannot be found. Fetch full history (git -C <template> fetch --unshallow) "
+            "or pass --base REV explicitly."
+        )
     stamp = app / STAMP
     if stamp.exists():
-        data = json.loads(stamp.read_text())
-        commit = data.get("templateCommit")
-        if commit and git(template, "cat-file", "-t", commit, check=False).strip() == "commit":
+        try:
+            data = json.loads(stamp.read_text())
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            sys.exit(f"error: {STAMP} is not valid JSON ({error}); fix it, delete it to "
+                     "detect the base by file matching, or pass --base REV explicitly.")
+        commit = data.get("templateCommit") if isinstance(data, dict) else None
+        if commit:
+            if git(template, "cat-file", "-t", commit, check=False).strip() != "commit":
+                sys.exit(
+                    f"error: {STAMP} records template commit {commit[:10]}, which is not in "
+                    "this template checkout (rewritten history, a fork, or an outdated "
+                    "clone). Point --template at a checkout that contains it, or pass "
+                    "--base REV explicitly."
+                )
             note = (" — generated from an uncommitted template: review re-applied hunks"
                     if data.get("templateDirty") else "")
             return commit, f"{STAMP} stamp{note}"
@@ -148,6 +186,8 @@ def detect_base(template: Path, app: Path, package: str, head: str) -> tuple[str
     # cleanly, while skipping one would silently lose it.
     def normalize(p: Path) -> bytes:
         raw = (app / p).read_bytes()
+        if not substitutes_placeholder(p.as_posix()):
+            return raw
         try:
             return raw.decode("utf-8").replace(package, PLACEHOLDER).encode("utf-8")
         except UnicodeDecodeError:
@@ -430,6 +470,11 @@ def main() -> int:
     if base == head:
         print("Already up to date.")
         return 0
+    if run(["git", "-C", str(template), "merge-base", "--is-ancestor", base, head],
+           check=False).returncode != 0:
+        sys.exit(f"error: base {base[:10]} is not an ancestor of head {head[:10]}: the template "
+                 "checkout (or --head) is older than the app's template, or on another branch. "
+                 "Upgrading would revert template changes; update the template checkout.")
     log = git(template, "log", "--oneline", "--no-decorate", f"{base}..{head}").splitlines()
     print(f"template commits ({len(log)}):")
     for line in log[:40]:
@@ -442,6 +487,9 @@ def main() -> int:
             out.mkdir()
             build_tree(template, rev, package, out, with_counter)
             trees[label] = read_tree(out)
+        # Permission bits of the target files, so new scripts stay executable.
+        head_modes = {path: (Path(raw) / "head" / path).stat().st_mode & 0o777
+                      for path in trees["head"]}
     rows, writes, ratio = plan_upgrade(app, package, trees["base"], trees["head"])
     diverged = ratio < DIVERGED_RATIO
     print(f"match:    {ratio:.0%} of the base template files are unchanged in the app"
@@ -468,7 +516,10 @@ def main() -> int:
             target.unlink()
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
+        existed = target.exists()
         target.write_bytes(data)
+        if not existed and path in head_modes:
+            target.chmod(head_modes[path])
     (app / STAMP).write_text(json.dumps({
         "templateCommit": head,
         "upgradedFrom": base,

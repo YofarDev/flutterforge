@@ -62,7 +62,7 @@ that must be reflected here and in `scripts/verify_template.sh`'s check.
   generated features) are written against those API generations (e.g. freezed
   v3 annotations with `sealed`, bloc_test v10, go_router 18). This blocks
   silent major upgrades during ordinary generation.
-- Minor/patch drift is allowed; each generated app keeps its own normal
+- Minor/patch drift is allowed; each generated app commits its own normal
   `pubspec.lock`.
 - Transitive dependencies are never pinned by hand.
 - The full smoke suite archives the smoke app's resolved `pubspec.lock` so the

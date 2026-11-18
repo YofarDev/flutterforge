@@ -37,10 +37,6 @@ void main() {
       homeCubit.close();
     });
 
-    test('initial state is HomeState.initial', () {
-      expect(homeCubit.state, const HomeState.initial());
-    });
-
     group('initialize', () {
       blocTest<HomeCubit, HomeState>(
         'emits [loading, loaded] when load succeeds',

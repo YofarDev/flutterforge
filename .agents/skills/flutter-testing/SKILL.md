@@ -5,17 +5,38 @@ description: "Use when writing tests for Flutter projects, including unit tests,
 
 # Flutter Testing
 
-## Quick Reference
+## What to Write (same rules as `test/README.md`)
 
-| Test Type | Tool | What to Test |
-|-----------|------|--------------|
-| Cubits/BLoCs | `bloc_test` | Public methods, state order, error paths |
-| Repositories | `mocktail` | Parameter forwarding, DTO mapping, failure translation |
-| Domain services | `flutter_test` + `mocktail` | Coordination logic, edge cases, no cubit deps |
-| Widgets | `flutter_test` | UI branches, interactions, provider wiring |
-| Screens | `flutter_test` | Integration with fake or mock cubits |
-| Architecture boundaries | `flutter_test` | Import rules, layer deps, cubit coupling |
-| DI wiring | `flutter_test` | Every registration resolves; factories return fresh instances |
+| Kind | Where | Covers |
+| --- | --- | --- |
+| Architecture gate | `architecture_test.dart` | Layering rules (one test; keep it green) |
+| DI smoke | `core/di/service_locator_test.dart` | Every registration resolves |
+| Repository | `features/<f>/data/repositories/` | Success, and exceptions/malformed payloads becoming a typed `Failure` |
+| Cubit | `features/<f>/presentation/bloc/` | The state transitions this cubit owns (success, failure, its own rules) |
+| Screen | `features/<f>/presentation/screens/` | What each state renders, and user actions |
+| Flow | `features/<f>/<f>_flow_test.dart` | The module's real registrations and route over a fake data source |
+| Shared mechanism | `core/` | Tested once where it is defined (exception mapper, `LatestRequestWins`, `localizeFailure`) |
+
+Do not write:
+
+- tests of framework or config (theme brightness, "uses Material 3");
+- tests that a widget or provider exists ("renders XView", "provides XCubit"): flow and behavior tests already fail if it is missing;
+- forwarding tests ("service delegates to repository", "arguments forwarded");
+- per-feature copies of shared mechanics.
+
+Repository, cubit and screen tests are added only when real mapping, rules or interaction logic lands; for scaffolded/forwarding code the one flow test is enough (prefer it over per-layer tests).
+
+Rules:
+
+- **Never wait on the clock**: no `Future.delayed`/`sleep` in tests. Await the real future, inject the I/O seam, use `pump(duration)` or `fakeAsync` for timers.
+- **Never mock pure domain logic**: use the real service and fake only I/O seams (data sources, platform channels).
+- **No global-state leaks**: full runs group many test files into one shared isolate per shard. `await getIt.reset()` in tearDown, restore `AppLogger`/`debugPrint` overrides, no static mutable state.
+
+## Running Tests
+
+- While iterating: `./scripts/ftest.sh <paths>` (machine-wide queue, failures-only output).
+- Before optimizing speed: `./scripts/ftest.sh --slowest[=N]` prints the slowest files/tests; per-file compile usually dominates, so fewer files beat faster tests.
+- Once before finishing: `./scripts/fverify.sh --fix`.
 
 **Read `flutter-architecture` first** — tests should mirror the intended boundaries and lifecycles.
 
@@ -32,8 +53,8 @@ test/
 │       └── session_service_test.dart
 └── features/
     └── auth/
-        ├── data/auth_repository_test.dart
-        ├── domain/login_use_case_test.dart
+        ├── auth_flow_test.dart
+        ├── data/repositories/auth_repository_impl_test.dart
         └── presentation/
             ├── bloc/auth_cubit_test.dart
             └── screens/login_screen_test.dart
@@ -57,32 +78,15 @@ blocTest<AuthCubit, AuthState>(
 );
 ```
 
-**Test every public method, every meaningful state transition, and every error path.**
+Cover the state transitions the cubit owns (success, failure, its own rules), not every public method.
 
-### Testing that a cubit uses a domain service
+### Cubits with domain services
 
-When a cubit delegates to a domain service, verify the delegation here and test the service's
-internal coordination in its own test file.
-
-```dart
-class MockSessionService extends Mock implements SessionService {}
-
-blocTest<AuthCubit, AuthState>(
-  'notifies session service on login',
-  build: () {
-    when(() => mockSession.onUserLoggedIn(any())).thenReturn(null);
-    return AuthCubit(repo: mockRepo, session: mockSession);
-  },
-  act: (c) => c.login('user@ex.com', 'pass'),
-  verify: (_) {
-    verify(() => mockSession.onUserLoggedIn(any())).called(1);
-  },
-);
-```
+Use the real service (it is pure logic) and fake only the repository or data source. Do not mock the service or `verify` calls on it; assert the resulting states.
 
 ## Repository Test
 
-A repository test should prove three things: correct API call, correct mapping, and correct failure translation.
+A repository test proves correct mapping and correct failure translation. Fake the data source; do not assert call forwarding.
 
 ```dart
 test('maps API dto to domain user on success', () async {
@@ -92,11 +96,6 @@ test('maps API dto to domain user on success', () async {
   )).thenAnswer((_) async => fakeUserDto);
 
   final result = await repo.login('user@ex.com', 'pass');
-
-  verify(() => mockApi.login(
-    email: 'user@ex.com',
-    password: 'pass',
-  )).called(1);
 
   result.fold(
     (_) => fail('Expected Right(User)'),
@@ -230,9 +229,8 @@ the FlutterForge template repository under `tools/checker_tests/`. A rule that i
 
 ## Feature-Flow Tests (real components over fake I/O)
 
-Isolated tests (cubit, repository, service, widget-with-fake-cubit) mock their
-dependencies — that is correct there and "real repositories in tests are wrong"
-applies **only** to them. Feature-flow tests are the opposite by design: they
+Isolated tests (cubit, repository, widget-with-fake-cubit) fake their
+direct dependencies. Feature-flow tests are the opposite by design: they
 pump the real dependency chain (real DI composition, real router, real
 repositories/services/cubits) and replace only the **data-source seam** with a
 scripted fake. For one feature, pass the fake to its module on a fresh
@@ -262,7 +260,6 @@ line yourself for hand-written registrations.
 - [ ] No assertions on another cubit's state
 
 **Repository:**
-- [ ] Arguments forwarded correctly
 - [ ] DTO mapped to domain entity/value object
 - [ ] `Left(Failure)` produced on errors
 - [ ] Failure message/type translated correctly
@@ -281,17 +278,18 @@ line yourself for hand-written registrations.
 | ❌ Wrong | ✅ Fix |
 |---------|-------|
 | Test private vars | Test public state + behavior |
-| Real repositories in *isolated* cubit tests | Mock the dependency via constructor — but see feature-flow tests below: real components over fake I/O are the correct choice there |
-| `pumpAndSettle()` everywhere | Prefer targeted `pump()` calls; use `pumpAndSettle()` only when you truly need it |
+| Real repositories in *isolated* cubit tests | Fake the repository via constructor; domain services stay real; flow tests use real components over fake I/O |
+| `pumpAndSettle()` / `Future.delayed` to wait | Await the real future, or `pump(duration)` / `fakeAsync` |
+| Mocking a domain service | Use the real one; fake only I/O seams |
+| `getIt` or logger state left behind | `await getIt.reset()` and restore overrides in tearDown |
 | `state.runtimeType` | Use `isA<StateType>()` or assert a concrete state value |
 | Repository test only checks `isRight()` | Assert mapped value and failure translation |
-| Skip error paths | Every `try/catch` needs a test |
+| Skip error paths | Test failure translation once at the repository boundary; the mapper is tested in `core/errors/` |
 | Use `mockito` by default | Prefer `mocktail` to avoid generation unless the project already standardizes on something else |
 | Assert on another cubit's state in a cubit test | Test each cubit in isolation |
 | Call `emit()` directly from the test body | Use `whenListen`, `MockCubit`, or a fake helper like `pushState()` |
 | Test framework/config ("uses Material 3", theme brightness) | Delete — it tests Flutter, not the app |
-| Test that a widget/provider exists ("renders XView", "provides XCubit") | Assert behavior; a behavior test already fails if the widget is missing |
-| Test that a service forwards to its repository | Test only the rules the service owns |
+| Test that a service forwards to its repository | Test only the rules the service owns (forwarding tests are forbidden) |
 | Re-test a shared mechanism in every feature (request ordering, close safety, failure copy) | Test it once where it is defined (`LatestRequestWins`, `localizeFailure`) |
 
 ## See Also

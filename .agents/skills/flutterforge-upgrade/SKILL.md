@@ -12,8 +12,10 @@ changes**. Never commit, push, or delete app-owned code without the user's OK.
 ## Inputs
 
 - **Template**: a local checkout of FlutterForge. Ask for its path if the user
-  did not give one; if they give a git URL, clone it into a temp directory. The
-  target is the template's committed `HEAD` unless the user names a revision.
+  did not give one; if they give a git URL, clone it into a temp directory with
+  **full history** (never `--depth`: the helper needs the app's original
+  template commit and refuses a shallow clone). The target is the template's
+  committed `HEAD` unless the user names a revision.
 - **App**: the current project root (the directory with `pubspec.yaml`).
 
 Old apps do not contain this skill or its helper; always run the helper from
@@ -81,7 +83,13 @@ Run the `flutter pub add ...` commands the report printed (never edit
 `pubspec.yaml` by hand). "pinned" lines need action only if the app's current
 constraint excludes the new one. For "removed from template", remove the
 package only if `./scripts/fcheck.sh <package>` and a manual check show it
-unused. Then:
+unused.
+
+If the upgrade adds or changes `build.yaml` (codegen scope), check it covers
+the app before generating: `grep -rlE "@freezed|@JsonSerializable" lib` — every
+match must sit under a `models/` or `bloc/` folder (freezed) or a `models/`
+folder (JSON). Add the app's other folders to its `generate_for` lists rather
+than moving code. Then:
 
 ```bash
 flutter pub get
@@ -140,6 +148,19 @@ apply what fits, smallest change first, re-running `fverify` after each:
   widget tests instead of the generated
   `AppLocalizations.localizationsDelegates`, whose deprecated Material and
   Cupertino delegates break every non-English locale.
+- **Stale checker self-tests**: older templates shipped the architecture
+  checker's own regression tests into apps. If `test/` still contains
+  `architecture_checker_test.dart`, `architecture_checker_boundaries_test.dart`,
+  `support/fixture_app.dart` or `support/checker_expectations.dart`, delete
+  them (keep `support/architecture_checker.dart` and `architecture_test.dart`):
+  they re-analyze the whole SDK ~70 times on every test run. They live in the
+  template's `tools/checker_tests/` now.
+- **Test queue** (`scripts/ftest.sh`, `scripts/fqueue.sh`): if the app's
+  `fverify.sh` was customized and kept its own version, re-add the queue: source
+  `fqueue.sh`, call `fqueue_acquire "fverify"` after `cd "$PROJECT_ROOT"`, and
+  run `dart fix --apply`, `flutter analyze` and `flutter test` through
+  `fqueue_nice`. Point app docs at `./scripts/ftest.sh` instead of bare
+  `flutter test`.
 - **One-command gate**: use `./scripts/fverify.sh --fix` instead of separate
   `dart fix` / `dart format` / `fverify` calls in any app docs or CI notes.
 

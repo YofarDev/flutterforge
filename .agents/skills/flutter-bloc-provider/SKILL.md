@@ -18,16 +18,18 @@ Error: Could not find the correct Provider<XCubit> above this Widget
 | Cubit Scope | Where to Provide |
 |-------------|------------------|
 | App-wide (auth, theme, locale) | App composition root such as `app.dart`, resolved from `getIt` |
-| Route-specific | `GoRoute` builder in `app_router.dart`, resolved from `getIt` |
+| Route-specific | `GoRoute` builder in the feature module (`<f>_module.dart`, `<f>Routes(getIt)`), resolved from `getIt` |
 | Pushed route (`Navigator.push`) | A cubit (or cubit factory) supplied by a composition root and injected via constructor — feature code never resolves `getIt` |
 | Dialog / bottom sheet | Inside `showDialog` / `showModalBottomSheet` builder |
 | Reused existing cubit | `BlocProvider.value(...)` in the new subtree |
 | Sub-widget | Parent `build()` only when you truly need a local subtree scope |
 
 **Locator policy (one consistent rule):** `getIt` may be resolved only in the
-composition roots — `service_locator.dart`, `app.dart`, `app_router.dart`
-(exactly what `test/architecture_test.dart` enforces). Feature presentation
-code receives cubits, or cubit factories, through constructors.
+composition roots — `service_locator.dart`, `app.dart`, `app_router.dart` and
+each feature's module `lib/features/<f>/<f>_module.dart` (exactly what
+`test/architecture_test.dart` enforces; nothing else may import a module).
+Feature presentation code receives cubits, or cubit factories, through
+constructors.
 
 ## Root Causes & Fixes
 
@@ -67,15 +69,19 @@ BlocProvider(
 
 **✅ FIX 2: Provide at the route / feature boundary (preferred)**
 ```dart
-// GoRoute builders live in app_router.dart — an allowed composition root,
-// where resolving from getIt is correct.
-GoRoute(
-  path: '/home',
-  builder: (_, __) => BlocProvider(
-    create: (_) => getIt<MyCubit>(),
-    child: const HomeScreen(),
+// lib/features/home/home_module.dart — the feature's composition root,
+// where resolving from getIt is correct. app_router.dart spreads
+// `...homeRoutes(getIt)`.
+List<RouteBase> homeRoutes(GetIt getIt) => <RouteBase>[
+  GoRoute(
+    path: Routes.home,
+    builder: (BuildContext context, GoRouterState state) =>
+        BlocProvider<MyCubit>(
+          create: (_) => getIt<MyCubit>(),
+          child: const HomeScreen(),
+        ),
   ),
-)
+];
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -119,11 +125,13 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// app_router.dart (composition root): getIt is resolved HERE, then injected.
+// home_module.dart (the feature's composition root): getIt is resolved HERE,
+// then injected.
 GoRoute(
-  path: '/home',
-  builder: (context, state) => HomeScreen(
-    detailCubitFactory: (detailId) => getIt<DetailCubit>(param1: detailId),
+  path: Routes.home,
+  builder: (BuildContext context, GoRouterState state) => HomeScreen(
+    detailCubitFactory: (String detailId) =>
+        getIt<DetailCubit>(param1: detailId),
   ),
 )
 ```
@@ -166,7 +174,7 @@ Future<void> _doSomething() async {
 
 - [ ] Provider is **above** the consuming subtree
 - [ ] Cubit lifetime is intentional: app-wide vs route-scoped vs local subtree
-- [ ] New cubit instances are resolved from `getIt` only in a composition root (`app.dart`, `app_router.dart`, `service_locator.dart`); feature code receives cubits or cubit factories via constructors
+- [ ] New cubit instances are resolved from `getIt` only in a composition root (`app.dart`, `app_router.dart`, `service_locator.dart`, the feature's `<f>_module.dart`); feature code receives cubits or cubit factories via constructors
 - [ ] Existing cubits reused across a new subtree use `BlocProvider.value`
 - [ ] `context.read()` is captured **before** `await`
 - [ ] `GoRoute`, `Navigator.push`, dialogs, and bottom sheets all create an explicit provider boundary

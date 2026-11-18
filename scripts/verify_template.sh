@@ -95,6 +95,8 @@ if [ "$FULL" = true ]; then
   else
     mkdir -p "$ARTIFACTS_DIR"
   fi
+  # Absolute: the harness runs from the repository root, the log from here.
+  ARTIFACTS_DIR="$(cd "$ARTIFACTS_DIR" && pwd)"
   step "Running FULL smoke suite (real Flutter; several minutes)..."
   step "Artifacts (log, versions, git revision, resolved pubspec.lock) -> $ARTIFACTS_DIR"
   # The complete suite output is retained in the artifacts dir, on success and

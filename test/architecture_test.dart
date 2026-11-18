@@ -11,13 +11,19 @@ import 'support/architecture_checker.dart';
 ///
 /// 1. Inward dependencies — presentation never imports data; domain never
 ///    imports data or presentation; data never imports presentation.
-/// 2. Domain purity — no Flutter UI libraries, generated localizations,
-///    router, DI, theme or logger in domain.
+/// 2. Domain purity — no Flutter UI libraries, `dart:ui`, flutter_bloc/bloc,
+///    go_router, generated localizations, router, DI, theme or logger in
+///    domain. A `part` file lives in its library's feature and layer.
 /// 3. Cross-feature access — only designated public domain barrels.
 /// 4. Public barrels expose domain contracts only.
 /// 5. Core stays infrastructure-only outside designated composition roots.
+///    Every `lib/` file outside `lib/features/` (`lib/shared/`, ...) is core.
+///    Every file under `lib/features/<f>/` is its barrel, its module, or in
+///    `data/`/`domain/`/`presentation/`; modules are imported only by
+///    `service_locator.dart` and `app_router.dart`.
 /// 6. No production component stores a Cubit/Bloc dependency (nullable, late,
-///    mutable, aliased, generic and inherited types included).
+///    mutable, aliased, generic, inherited, record, factory and freezed
+///    fields included); a Widget or its State may keep a cubit it receives.
 /// 7. Locator access — get_it resolution (imports of `package:get_it` and
 ///    references to the app's `getIt`) is limited to `lib/app.dart`,
 ///    `lib/core/di/service_locator.dart` and

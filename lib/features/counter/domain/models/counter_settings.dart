@@ -1,7 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 part 'counter_settings.freezed.dart';
-part 'counter_settings.g.dart';
 
 /// Counter behavior settings.
 @freezed
@@ -22,9 +21,6 @@ abstract class CounterSettings with _$CounterSettings {
     /// The interval for milestone notifications (if `showMilestones`).
     @Default(10) int milestoneInterval,
   }) = _CounterSettings;
-
-  factory CounterSettings.fromJson(Map<String, dynamic> json) =>
-      _$CounterSettingsFromJson(json);
 
   const CounterSettings._();
 }

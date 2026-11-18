@@ -176,6 +176,32 @@ void main() {
   );
 
   testWidgets(
+    'opened from a deep link, the counter back button goes home instead of '
+    'throwing on an empty stack',
+    (WidgetTester tester) async {
+      await configureApp();
+      enqueueSuccess();
+
+      // A literal path, like a real deep link (and no counter-only import
+      // for remove_counter.sh to leave behind).
+      final GoRouter router = AppRouter.createRouter(
+        initialLocation: '/counter',
+      );
+      await tester.pumpWidget(MyApp(router: router));
+      await tester.pumpAndSettle();
+      expect(find.text('Counter Demo'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Flow welcome'), findsOneWidget);
+
+      await disposeApp(tester, router);
+    },
+  );
+
+  testWidgets(
     'counter applies non-default settings and bounds through the real service',
     (WidgetTester tester) async {
       await configureApp(

@@ -19,15 +19,15 @@ FlutterForge is a template + toolkit that helps you:
 git clone <this-repo> flutterforge
 cd flutterforge
 
-# 2. Create your new project
-# This creates a new directory 'my_app'. The destination must NOT already
+# 2. Create your new project NEXT TO the template (never inside it)
+# This creates a new directory '../my_app'. The destination must NOT already
 # exist: the generator refuses to overwrite an existing file, directory
 # (empty included) or symlink, so retries can never destroy your work.
 # Any standard 'flutter create' arguments are forwarded (e.g. --platforms).
-dart create_project.dart --org=com.yourcompany --platforms=android,ios my_app
+dart create_project.dart --org=com.yourcompany --platforms=android,ios ../my_app
 
 # 3. Start developing
-cd my_app
+cd ../my_app
 flutter run
 ```
 
@@ -68,23 +68,31 @@ dart create_project.dart [options] <destination>
 Additional rules:
 
 - **Destination.** Exactly one destination is accepted; ambiguous input
-  (multiple paths, a missing option value) is rejected before `flutter create`
-  runs. The destination must not exist — an existing file, an empty or
+  (multiple paths, a missing option value, `--org`/`--project-name`/
+  `--description` given twice) is rejected before `flutter create` runs.
+  `-h`/`--help` prints usage only in an option position, never as an option's
+  value. The destination must not exist — an existing file, an empty or
   non-empty directory, or a symlink (dangling included) is refused without
-  being modified. Absolute and relative destinations work, including paths
-  with spaces.
+  being modified — and must be outside the template checkout. Absolute and
+  relative destinations work, including paths with spaces and a trailing
+  slash.
 - **Package name.** The Dart package name is validated (`lowercase_with_underscores`,
   no Dart reserved identifiers) and is never derived from a filesystem path
   beyond its final component. Use `--project-name` when the directory name is
-  not a valid package name.
+  not a valid package name. Names of packages the app depends on
+  (`go_router`, `path`, `intl`, `flutter_test`, ...) are refused up front.
 - **Staging.** Generation happens in a hidden staging directory next to the
   destination; the app is analyzed and tested there, then published under its
   final name and re-resolved (`flutter pub get`) at the final path. This
   protects ordinary retries — it is not a guarantee against concurrent
   writers to the same destination.
 - **Failures.** A failed generation exits non-zero and keeps the staging
-  directory (its path is printed) for diagnosis. Nothing is ever deleted from
-  a caller-supplied directory.
+  directory (its path is printed) for diagnosis — unexpected errors (a missing
+  tool, a permission error) included. Nothing is ever deleted from a
+  caller-supplied directory.
+- **Template stamp.** `.flutterforge.json` records the template commit only
+  when the template is its own git checkout (not vendored inside another
+  repository); uncommitted or untracked template files mark it dirty.
 - **Template checks.** Required template files and the `flutter`, `dart` and
   `bash` executables are validated before anything is created; the template
   root is resolved from the generator script location, not your working
@@ -117,7 +125,8 @@ script also require `uv`.
 
 | Script                                         | Purpose                                               |
 | ---------------------------------------------- | ----------------------------------------------------- |
-| `./scripts/fverify.sh [--fix]` | Check formatting, analyze, and run tests before finishing an app change. Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format .`. Resolve dependencies and regenerate code when needed. |
+| `./scripts/fverify.sh [--fix]` | Check formatting, analyze, and run tests before finishing an app change. Non-mutating by default; `--fix` first runs `dart fix --apply` and `dart format` on the Dart source dirs (never `build/`). Resolve dependencies and regenerate code when needed. Waits for the machine-wide test queue (below). |
+| `./scripts/ftest.sh [paths] [--slowest[=N]]` | `flutter test` through a machine-wide queue (`scripts/fqueue.sh`, lock in `~/.cache/flutterforge/`; heavy lane for full runs, light lane for path-scoped runs), niced, each compile error printed once. Full runs compile test files into a few parallel shards (one compile and one isolate per shard instead of per file) and skip an architecture gate whose inputs are unchanged since its last green run. `--slowest[=N]` prints the slowest files/tests. |
 | `./scripts/fgen.sh "feature_name" [--with-service] [--with-dto]` | Generate new feature boilerplate (lean Clean Architecture by default; `--with-service` adds a placeholder domain service, `--with-dto` adds a transport DTO). Refuses to overwrite an existing feature. |
 | `./scripts/fmap.sh` | Print a one-line-per-feature project map (routes, wiring, layers, barrel dependencies) to orient an agent cheaply. |
 | `./scripts/fanal.sh [project_path]`          | Write or overwrite `flutter_analysis.md` with heuristic audit leads for source review. Defaults to the current project. |
@@ -126,7 +135,7 @@ script also require `uv`.
 | `./scripts/fimp.sh`                          | Preview proposed import repairs (writes nothing). `--apply` repairs unambiguous broken imports, then re-runs analysis; verification failure is reported and edits retained. |
 | `./scripts/fcheck.sh [package_name]`         | Inventory dependencies or list one package's direct imports (review aid only; inspect exports, indirect usage, code generation, assets and platform channels before changing dependencies) |
 | `./scripts/fl10n.sh`                         | Find hardcoded user-facing strings needing l10n      |
-| `./scripts/sync_skills.sh [--check] [--user]` | Check drift without writing (`--check`), or copy canonical skill Markdown into matching existing optional targets. `--user` additionally targets user-level copies when requested; missing directories are skipped and extras retained. |
+| `./scripts/sync_skills.sh [--check] [--user]` | Check drift without writing (`--check`), or copy every canonical skill file into matching existing optional targets (a target symlinked into another checkout's canonical `.agents/skills/` is never written). `--user` additionally targets user-level copies when requested; missing directories are skipped and extras retained. |
 
 The generator also copies `./remove_counter.sh` to the app root. It deletes
 the untouched Counter demo and updates its wiring/tests; use it only for a
@@ -142,6 +151,13 @@ into generated apps. `verify_template.sh` and `tools/test_template.py` are
 template-maintenance tools and stay repository-only. Personal automation
 (`fbuild.sh`, `pre_script_claude.sh`) lives in the template repository's
 `personal_tools/` directory and is never installed into generated apps.
+
+**Machine-wide `flutter` shim (optional).** `personal_tools/install_flutter_shim.sh`
+puts `personal_tools/flutter_shim.sh` first on `PATH` as `flutter`: every bare
+`flutter test` / `flutter analyze` on the machine (any project, any agent) then
+waits for the same queue as `ftest.sh`/`fverify.sh` and runs niced; every other
+flutter command passes straight through. `--check` reports status, `--remove`
+uninstalls.
 
 `fimp` supports static library-header URI tokens, relative imports in both
 source trees and conditional branches. It preserves comments and reports
@@ -251,15 +267,20 @@ Generation contract:
 - The script must run inside a FlutterForge application; the app root is
   resolved by walking up from the current directory (no fallback project name).
 - Feature names are normalized to snake_case and validated as Dart identifiers
-  (empty values, separators, `..`, punctuation, invalid starting characters
-  and Dart reserved identifiers are rejected).
+  (empty values, separators, `..`, punctuation, invalid starting characters,
+  leading/trailing/doubled underscores and Dart reserved identifiers are
+  rejected). A name whose generated classes would clash with a type the
+  feature imports (e.g. `image`, `page`, `form`, `failure`, `string`) is
+  refused before anything is written.
 - It refuses to run if the feature's `lib/` or `test/` directory already
   exists (symlinks included) — an existing feature is never partially
   overwritten.
 - Files are rendered into a temporary directory and published only after
   validation. Screen localization keys are added via `./scripts/fstr.sh` (with a
-  key-collision check); if that or `build_runner` fails, the published feature
-  is kept and the script exits non-zero.
+  key-collision check); if that or `build_runner` fails, the published (and
+  already wired) feature is kept and the script exits non-zero. Finally the new
+  feature and the wired files are analyzed; analyzer errors make it exit
+  non-zero instead of reporting success.
 
 `fgen` wires the feature itself: it generates `lib/features/<name>/<name>_module.dart`
 (the feature's registrations and routes) and inserts it at the `// fgen:` markers

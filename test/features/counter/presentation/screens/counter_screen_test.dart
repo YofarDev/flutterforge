@@ -1,50 +1,30 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fpdart/fpdart.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:mocktail/mocktail.dart';
-import 'package:my_flutter_app/core/di/service_locator.dart';
 import 'package:my_flutter_app/core/l10n/app_localization_delegates.dart';
 import 'package:my_flutter_app/core/l10n/generated/app_localizations.dart';
-import 'package:my_flutter_app/core/models/failure.dart';
-import 'package:my_flutter_app/features/counter/domain/models/counter_settings.dart';
+import 'package:my_flutter_app/features/counter/data/models/counter_settings_dto.dart';
+import 'package:my_flutter_app/features/counter/data/repositories/counter_repository_impl.dart';
 import 'package:my_flutter_app/features/counter/domain/services/counter_service.dart';
 import 'package:my_flutter_app/features/counter/presentation/bloc/counter_cubit.dart';
 import 'package:my_flutter_app/features/counter/presentation/screens/counter_screen.dart';
 
-class MockCounterService extends Mock implements CounterService {}
+import '../../../../support/fake_counter_data_source.dart';
 
-/// Behavior tests for the counter UI driven by a real CounterCubit.
+/// Behavior tests for the counter UI driven by a real CounterCubit, real
+/// CounterService and real repository over a fake persistence seam.
 void main() {
-  setUpAll(() {
-    registerFallbackValue(const CounterSettings());
-  });
-
   group('CounterView', () {
     late CounterCubit counterCubit;
-    late MockCounterService mockCounterService;
 
     setUp(() {
-      mockCounterService = MockCounterService();
-      counterCubit = CounterCubit(mockCounterService);
-
-      getIt.reset();
-      getIt.registerFactory<CounterCubit>(() => counterCubit);
-
-      // Default stubs
-      when(() => mockCounterService.getSettings()).thenAnswer(
-        (_) async => const Right<Failure, CounterSettings>(CounterSettings()),
+      counterCubit = CounterCubit(
+        CounterService(
+          CounterRepository(
+            FakeCounterLocalDataSource(const CounterSettingsDto()),
+          ),
+        ),
       );
-      when(() => mockCounterService.clampValue(any(), any())).thenAnswer(
-        (Invocation invocation) => invocation.positionalArguments[0] as int,
-      );
-      when(() => mockCounterService.applyStepSize(any(), any()))
-          .thenAnswer((Invocation invocation) {
-            final int val = invocation.positionalArguments[0] as int;
-            final CounterSettings settings =
-                invocation.positionalArguments[1] as CounterSettings;
-            return val + settings.stepSize;
-          });
     });
 
     tearDown(() {
@@ -62,16 +42,11 @@ void main() {
       );
     }
 
-    testWidgets('displays initial count of 0', (WidgetTester tester) async {
-      await tester.pumpWidget(buildTestableWidget(const CounterView()));
-
-      expect(find.text('0'), findsOneWidget);
-    });
-
-    testWidgets('increments count when + button is tapped', (
+    testWidgets('starts at 0 and increments when + is tapped', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(buildTestableWidget(const CounterView()));
+      expect(find.text('0'), findsOneWidget);
 
       await tester.tap(find.byIcon(Icons.add));
       await tester.pumpAndSettle();
@@ -113,12 +88,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('0'), findsOneWidget);
-    });
-
-    testWidgets('displays counter title', (WidgetTester tester) async {
-      await tester.pumpWidget(buildTestableWidget(const CounterView()));
-
-      expect(find.text('Counter Demo'), findsOneWidget);
     });
   });
 }

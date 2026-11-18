@@ -19,7 +19,7 @@ Core rules. Details, long examples and rationale live in
 | DI | `get_it`; app-wide in `service_locator.dart`, per feature in `<f>_module.dart` |
 | State | Cubit by default; BLoC when events/concurrency transformers clarify the flow |
 | State shape | Union state for load lifecycles; flat `copyWith` state for interactive state |
-| Models | `freezed` (v3: `sealed`/`abstract` classes) |
+| Models | `freezed` (v3: `sealed`/`abstract` classes), only in a `models/` or `bloc/` folder (`build.yaml` limits codegen there) |
 | Errors | Repos return `Either<Failure, T>` (fpdart); unknown exceptions → `mapExceptionToFailure` |
 | Reads in cubits | `LatestRequestWins` mixin (`core/bloc/`) — never hand-rolled request ids |
 | Cubit deps | Cubits never depend on cubits — share a domain service |
@@ -145,10 +145,15 @@ this boundary. Full example and its tests: reference.md → Repository Pattern.
 ## Enforced vs review guidance
 
 `test/architecture_test.dart` fails on: outward dependencies, impure domain
-(also through re-export chains), cross-feature imports other than barrels,
+(Flutter UI, `dart:ui`, `flutter_bloc`/`bloc`, `go_router` — also through
+re-export chains), part files in another feature/layer than their library,
+`file:` URIs, cross-feature imports other than barrels,
 barrels exposing data/presentation, feature dependency cycles, core importing
-features outside composition roots, stored cubit fields, get_it use outside
-composition roots/modules, registrations outside `service_locator.dart` and
-modules. Naming, cubit sizing, listener nesting, rebuild scope and lifetimes
+features outside composition roots (any `lib/` folder outside `lib/features/`,
+e.g. `lib/shared/`, is core), feature files outside the barrel, module and
+`data/`/`domain/`/`presentation/`, modules imported outside `service_locator.dart`
+and `app_router.dart`, stored cubit fields (widgets and their `State` may
+keep a cubit they receive), get_it use outside composition
+roots/modules, registrations outside `service_locator.dart` and modules. Naming, cubit sizing, listener nesting, rebuild scope and lifetimes
 are review guidance. Add a negative test with any new rule (reference.md →
 Executable Rules).
