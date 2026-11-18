@@ -1955,6 +1955,7 @@ class TestFtestRuns(unittest.TestCase):
             "void main() { matchesGoldenFile('x.png'); }\n"
         )
         (self.app / "test" / "core" / "args_test.dart").write_text("void main(List<String> a) {}\n")
+        (self.app / "test" / "core" / "boot_test.dart").write_text("// ftest:isolate\nvoid main() {}\n")
         bin_dir = root / "bin"
         bin_dir.mkdir()
         self.calls = root / "calls"
@@ -2008,6 +2009,7 @@ class TestFtestRuns(unittest.TestCase):
                 ".dart_tool/flutterforge/shard_0_test.dart",
                 "test/core/args_test.dart",
                 "test/core/golden_test.dart",
+                "test/core/boot_test.dart",
                 "test/architecture_test.dart",
             ]),
         )

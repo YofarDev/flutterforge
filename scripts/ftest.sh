@@ -22,8 +22,10 @@
 #     loading was ~80% of a small app's full run, while large suites keep
 #     their test bodies running in parallel. Files that need their own isolate
 #     run separately: golden tests (paths are relative to the test file),
-#     files with library-level @TestOn/@Tags/@Timeout/@Skip/@OnPlatform, and
-#     everything when a nested flutter_test_config.dart exists.
+#     files with library-level @TestOn/@Tags/@Timeout/@Skip/@OnPlatform, files
+#     with a `// ftest:isolate` line (state a shared isolate breaks, e.g. a
+#     full app boot that needs fresh plugins), and everything when a nested
+#     flutter_test_config.dart exists.
 #     FORGE_TEST_AGGREGATE=0 restores one isolate per file;
 #   - FULL runs skip test/architecture_test.dart when lib/, pubspec.lock and
 #     the checker are unchanged since its last green run (stamp in
@@ -239,6 +241,7 @@ for file in $ALL_FILES; do
   [ "$file" = "$ARCH_TEST" ] && continue
   if [ -n "$NESTED_CONFIG" ] \
     || grep -q 'matchesGoldenFile' "$file" \
+    || grep -q '^// ftest:isolate' "$file" \
     || grep -Eq '^@(TestOn|Tags|Timeout|Skip|OnPlatform)' "$file" \
     || ! grep -Eq '(^|[^A-Za-z0-9_])main *\( *\)' "$file"; then
     STANDALONE="$STANDALONE $file"

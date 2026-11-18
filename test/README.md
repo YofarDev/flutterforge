@@ -49,7 +49,7 @@ for scaffolded/forwarding code. The exception mapper is tested once in
 - **Never mock pure domain logic**: use the real service and fake only I/O
   seams (data sources, platform channels).
 - **No global-state leaks**: full runs (`fverify`, `ftest` without paths)
-  group many test files into one shared isolate per shard. `await getIt.reset()` in tearDown,
+  group many test files into one shared isolate per shard. A file that passes alone but fails in a full run leaks or depends on global state: fix it, or as a last resort add a `// ftest:isolate` line so it keeps its own isolate. `await getIt.reset()` in tearDown,
   restore `AppLogger`/`debugPrint` overrides, no static mutable state.
 - Before optimizing, run `./scripts/ftest.sh --slowest[=N]`; per-file compile
   dominates, so fewer files beat faster tests.
