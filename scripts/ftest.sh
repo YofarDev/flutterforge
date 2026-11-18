@@ -235,12 +235,28 @@ if [ -z "$ALL_FILES" ]; then
 fi
 NESTED_CONFIG="$(find test -mindepth 2 -name 'flutter_test_config.dart' | head -n 1)"
 
+# Golden comparisons resolve paths relative to the test file, so golden tests
+# keep their own isolate — also when they go through a shared helper
+# (test/**/golden_harness.dart calling matchesGoldenFile).
+GOLDEN_HELPERS="$(grep -rl 'matchesGoldenFile' test --include='*.dart' 2>/dev/null \
+  | grep -v '_test\.dart$' | sed 's|.*/||' | LC_ALL=C sort -u || true)"
+uses_golden_helper() {
+  local helper
+  for helper in $GOLDEN_HELPERS; do
+    if grep -Eq "^import ['\"][^'\"]*/?$helper['\"]" "$1"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 AGGREGATED=""
 STANDALONE=""
 for file in $ALL_FILES; do
   [ "$file" = "$ARCH_TEST" ] && continue
   if [ -n "$NESTED_CONFIG" ] \
     || grep -q 'matchesGoldenFile' "$file" \
+    || uses_golden_helper "$file" \
     || grep -q '^// ftest:isolate' "$file" \
     || grep -Eq '^@(TestOn|Tags|Timeout|Skip|OnPlatform)' "$file" \
     || ! grep -Eq '(^|[^A-Za-z0-9_])main *\( *\)' "$file"; then
