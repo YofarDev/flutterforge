@@ -292,7 +292,9 @@ fi
 # 4. Regenerate localizations when ARB keys were removed.
 if [ -f .forge_arb_changed ]; then
     rm -f .forge_arb_changed
-    if command -v flutter >/dev/null 2>&1; then
+    if [ "${FORGE_SKIP_GEN_L10N:-0}" = "1" ]; then
+        : # set by the upgrade helper for its reference trees (not a Flutter app)
+    elif command -v flutter >/dev/null 2>&1; then
         if flutter gen-l10n >/dev/null; then
             echo "   ✓ Localizations regenerated"
         else

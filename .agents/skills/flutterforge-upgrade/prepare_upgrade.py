@@ -54,8 +54,9 @@ TEMPLATE_ONLY_SCRIPTS = {"scripts/verify_template.sh", "scripts/README.md"}
 
 
 def run(args: list[str], cwd: Path | None = None, check: bool = True,
-        data: bytes | None = None) -> subprocess.CompletedProcess:
-    result = subprocess.run(args, cwd=cwd, input=data, capture_output=True)
+        data: bytes | None = None, env: dict | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run(args, cwd=cwd, input=data, capture_output=True,
+                            env=None if env is None else {**os.environ, **env})
     if check and result.returncode != 0:
         sys.exit(f"error: {' '.join(args)}\n{result.stderr.decode(errors='replace')}")
     return result
@@ -136,7 +137,9 @@ def build_tree(template: Path, rev: str, package: str, out: Path, with_counter: 
     if not with_counter and (out / "remove_counter.sh").exists():
         # Apply the same Counter removal the app went through, to both trees.
         (out / "pubspec.yaml").write_text(f"name: {package}\n")
-        result = run(["bash", "remove_counter.sh"], cwd=out, check=False)
+        # A reference tree is not a Flutter app: skip localization codegen.
+        result = run(["bash", "remove_counter.sh"], cwd=out, check=False,
+                     env={"FORGE_SKIP_GEN_L10N": "1"})
         (out / "pubspec.yaml").unlink()
         if result.returncode != 0:
             sys.exit(f"error: remove_counter.sh failed in reference tree for {rev}:\n"

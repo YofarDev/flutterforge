@@ -2742,6 +2742,15 @@ class TestUpgradeHelper(unittest.TestCase):
             stamp = json.loads((app / ".flutterforge.json").read_text())
             self.assertEqual(stamp["templateCommit"], self.head)
 
+    def test_reference_tree_without_counter_builds_at_head(self) -> None:
+        """Apps that removed the Counter demo: the helper replays
+        remove_counter.sh in a reference tree that is not a Flutter app."""
+        with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
+            out = Path(raw) / "tree"
+            out.mkdir()
+            self.helper.build_tree(REPO_ROOT, self.head, "demo_app", out, False)
+            self.assertFalse((out / "lib" / "features" / "counter").exists())
+
     def test_stamp_at_head_reports_up_to_date(self) -> None:
         with tempfile.TemporaryDirectory(prefix="forge_upgrade_") as raw:
             app = self._make_app(Path(raw).resolve(), self.head)
