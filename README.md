@@ -186,6 +186,8 @@ The template copies `.agents/` (the canonical skill source) and `AGENTS.md` into
 - **mobile-ux-audit** - Hands-on UI/UX audit of the running app (investigates and recommends only).
 - **flutterforge-upgrade** - Upgrades an app generated from an older template version (3-way merge that keeps the app's customizations).
 - **prepare-context** - Exports project files as `.txt` into a flat folder (`context-export/`) for external AI tools.
+- **play-store-aso** - Audits and rewrites a Google Play listing (competitors, keywords, copy, limits), then updates Play Console with approval.
+- **play-store-screenshots** - Localised store screenshots and feature graphic from real app captures, via the bundled Script4Me generator (`scripts/app_store_promo_generator.py`) and its automated QA.
 
 These instructions are available immediately in generated projects instead of recreating them by hand.
 
