@@ -1,0 +1,12 @@
+{
+  "subreddit": "AndroidClosedTesting",
+  "my_app": {
+    "name": "My App",
+    "package": "com.example.myapp",
+    "group": "https://groups.google.com/g/my-app-testers",
+    "web": "https://play.google.com/apps/testing/com.example.myapp",
+    "android": "https://play.google.com/store/apps/details?id=com.example.myapp"
+  },
+  "comment_template": "Tested {app}: joined the group, opted in and installed. {feedback} Screenshot attached, I'll keep it installed for 14 days.\n\nCould you test mine back? ({my_name})\n\nJoin Group: {my_group}\n\nWeb Link: {my_web}\n\nAndroid Link: {my_android}",
+  "reddit_user": "your_reddit_username"
+}
