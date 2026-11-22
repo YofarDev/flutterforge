@@ -28,7 +28,8 @@ typedef RiveView = ({String label, rive.RiveWidgetController c});
 
 /// Framework / wrapper types skipped when naming a RiveWidget's owner.
 final RegExp _framework = RegExp(
-  '^(_|Rive|Listener|GestureDetector|RawGestureDetector|Semantics|'
+  '^(_|Rive|Animated|Cupertino|Default|Inherited|Implicit|Scroll|Primary|'
+  'Modal|Page|Notification|Material|Text|Icon|Ticker|Raw|Tooltip|Listener|GestureDetector|RawGestureDetector|Semantics|'
   'MergeSemantics|ExcludeSemantics|Center|Align|SizedBox|ConstrainedBox|'
   'Padding|Transform|Opacity|FadeTransition|ScaleTransition|'
   'SlideTransition|AnimatedBuilder|ListenableBuilder|ValueListenableBuilder|'
@@ -40,11 +41,14 @@ final RegExp _framework = RegExp(
   'TickerMode|MediaQuery|Theme|DefaultTextStyle|IconTheme|Material|'
   'InkWell|Ink|Hero|SafeArea|Directionality|Focus|FocusScope|Actions|'
   'Shortcuts|BlocBuilder|BlocSelector|BlocListener|BlocConsumer|'
-  'MultiBlocListener|Provider|InheritedWidget)',
+  'MultiBlocListener|Provider|InheritedWidget|DefaultSelectionStyle|'
+  'Scaffold|Navigator|Overlay|Router|HeroControllerScope)',
 );
 
-/// Every mounted RiveWidget, labelled `<owner widget>/<artboard>`.
-List<RiveView> riveViews() {
+/// Every mounted RiveWidget, labelled `<owner widget>/<artboard>`. The owner
+/// is the nearest Stateless/Stateful ancestor not matching the framework
+/// list; pass [ownerSkip] to skip more (e.g. the app's generic wrappers).
+List<RiveView> riveViews({RegExp? ownerSkip}) {
   final List<RiveView> out = <RiveView>[];
   void visit(Element e) {
     final Widget w = e.widget;
@@ -52,7 +56,12 @@ List<RiveView> riveViews() {
       String owner = '?';
       e.visitAncestorElements((Element a) {
         final String t = a.widget.runtimeType.toString();
-        if (_framework.hasMatch(t)) {
+        // Only plain Stateless/Stateful widgets name an owner (skips
+        // InheritedWidgets, ParentDataWidgets such as LayoutId, and render
+        // object widgets).
+        if ((a is! StatelessElement && a is! StatefulElement) ||
+            _framework.hasMatch(t) ||
+            (ownerSkip?.hasMatch(t) ?? false)) {
           return true;
         }
         owner = t;

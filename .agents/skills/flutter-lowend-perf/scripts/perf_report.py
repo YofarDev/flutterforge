@@ -27,7 +27,8 @@ ENGINE_PREFIXES = ("Animator", "Vsync", "Rasterizer", "GPURasterizer", "SurfaceF
                    "Create", "Destroy", "Semantics", "Canvas", "DartIsolate", "Engine", "Frame")
 ENGINE_NAMES = {"BUILD", "LAYOUT", "PAINT", "COMPOSITING", "SEMANTICS", "FINALIZE TREE", "POST_FRAME",
                 "UPDATING COMPOSITING BITS", "LAYOUT (root)", "PAINT (root)", "SEMANTICS (root)",
-                "UPDATING COMPOSITING BITS (root)"}
+                "UPDATING COMPOSITING BITS (root)", "ReactOnce", "FlushOps", "ConsolidateHandles",
+                "PipelineFull"}
 
 
 def load(path: str) -> dict:
@@ -87,8 +88,13 @@ def phases(runs: list[tuple[str, dict]]) -> None:
         print(f"  {k[:20]:20} " + "   ".join(f"{c:>36}" for c in cells))
 
 
-def is_widget(name: str) -> bool:
-    return name not in ENGINE_NAMES and not name.startswith(ENGINE_PREFIXES) and "::" not in name
+def is_widget(e: dict) -> bool:
+    """Widget builds (debugProfileBuildsEnabled) are Dart-stream events named after the widget type."""
+    name = e["name"]
+    if e.get("cat") not in (None, "", "Dart"):
+        return False
+    return (name not in ENGINE_NAMES and not name.startswith(ENGINE_PREFIXES) and "::" not in name
+            and "." not in name)
 
 
 def traces(runs: list[tuple[str, dict]]) -> None:
@@ -108,7 +114,7 @@ def traces(runs: list[tuple[str, dict]]) -> None:
             sl = next((e for e in top if e["name"] == "Canvas::saveLayer"), None)
             if sl:
                 print(f"  saveLayer {sl['n'] / frames:.1f}/frame ({sl['ms']:.0f} ms total)")
-            w = [e for e in top if is_widget(e["name"])]
+            w = [e for e in top if is_widget(e)]
             if w:
                 print("  widgets built (count ~ frames = rebuilds every frame):")
                 for e in w[:12]:

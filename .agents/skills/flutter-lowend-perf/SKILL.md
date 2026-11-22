@@ -60,6 +60,11 @@ an install fails, and uninstalls the test app after the run.
    (it once measured the owner's other app). `perf_run.py` prints the
    foreground app. Force-stop leftovers of the perf app (it does).
 5. Xiaomi/HyperOS asks the owner to accept every USB install: say so.
+   `flutter drive --use-application-binary` installs that APK again itself
+   (under the APK's own id, so the real app is safe): expect up to two
+   prompts on a new build.
+6. Share the checkout with nobody during a run: `build/integration_response_data.json`
+   is one file per checkout. `perf_run.py` rejects a report older than the run.
 
 ## Setup (once per app)
 
@@ -167,4 +172,7 @@ the ticker honours `TickerMode`. Details in REFERENCE.md.
 | Emulator `offline` after `taskpolicy -b` | background QoS starves qemu: don't |
 | Software-GPU emulator timings | 10x slower than any phone: don't use |
 | Ablation shows +8 ms when turning a view *off* | the app rested others; toggling woke them. `riveAblation` sets all running first. |
+| Report shows phases of a different take | stale `build/integration_response_data.json` (another run in the same checkout): `perf_run.py` now refuses reports older than the run |
+| Emulator install "takes" hours, then `device not found` | the emulator hung/died: `lowend_avd.sh --kill`, boot again, rerun |
+| Trace lists `FlushOps`/`ReactOnce` as top events | Impeller GLES reactor (emulators, some old GPUs): raster-side work, not widgets. The report filters widgets by the `Dart` category |
 | `debugProfileBuildsEnabled` in profile | works in profile; adds overhead: trace runs are for *what*, not *how much* |

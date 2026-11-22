@@ -21,9 +21,10 @@ Run from the Flutter app's root. What it does, in order:
    the same APK is already installed: some phones ask the owner to accept
    every USB install).
 5. Runs `flutter drive --use-application-binary --keep-app-running
-   --no-dds`: Flutter never installs or uninstalls anything (plain
-   `flutter drive` uninstalls by the manifest's base id, i.e. the real
-   app, when an install fails, and removes the perf app after the run).
+   --no-dds`: Flutter (re)installs only that APK, under the APK's own id,
+   and keeps it after the run (plain `flutter drive` resolves the id from
+   the manifest: it uninstalls the REAL app when an install fails, and
+   removes the app after the run).
 6. Copies build/integration_response_data.json to <out>/<tag>.json, keeps
    the log at <out>/<tag>.log, checks the real app is still installed, and
    prints the report.
@@ -37,6 +38,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -113,6 +115,8 @@ def main() -> None:
     awake = adb(device, "shell", "dumpsys", "power", check=False).stdout
     wake = next((l.strip() for l in awake.splitlines() if "mWakefulness=" in l), "?")
     print(f"device {device}: {wake}; front: {resumed}")
+    if a.package not in resumed and "launcher" not in resumed.lower():
+        print("WARNING: another app is in front. If it is a Flutter app, drive may attach to it: close it.")
     if "Asleep" in wake or "Dozing" in wake:
         sys.exit("screen is off: unlock the device and keep it untouched during the take")
     real_before = installed(device, a.real_package) if a.real_package else None
@@ -144,6 +148,7 @@ def main() -> None:
     # 5. drive
     resp = Path("build/integration_response_data.json")
     resp.unlink(missing_ok=True)
+    started = time.time()
     log = out / f"{a.tag}.log"
     cmd = ["flutter", "drive", "--profile", "--no-dds", "-d", device,
            f"--use-application-binary={apk}", "--keep-app-running",
@@ -162,8 +167,9 @@ def main() -> None:
     # 6. results
     if a.real_package and real_before and not installed(device, a.real_package):
         print(f"WARNING: {a.real_package} was installed before the run and is GONE now. Tell the owner.")
-    if not resp.exists() or resp.stat().st_size < 10:
-        sys.exit("no report data (the take failed before probe.finish(), or drive attached to another app)")
+    if not resp.exists() or resp.stat().st_size < 10 or resp.stat().st_mtime < started:
+        sys.exit("no fresh report data (the take failed before probe.finish(), drive attached to another app, "
+                 "or another run in this checkout wrote build/integration_response_data.json)")
     dst = out / f"{a.tag}.json"
     shutil.copy(resp, dst)
     print(f"report: {dst}\n")

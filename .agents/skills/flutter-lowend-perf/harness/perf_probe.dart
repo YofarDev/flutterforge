@@ -202,16 +202,18 @@ Map<String, Object?> frameStats(List<Map<String, int>> f) {
   };
 }
 
-/// Engine + widget events in one traced window: per name the count and
-/// total ms, top 40 by count. With debugProfileBuildsEnabled every widget
+/// Engine + widget events in one traced window: per name the category,
+/// count and total ms, top 40 by count. With debugProfileBuildsEnabled every widget
 /// build is an event named after its type: a widget whose count ≈ the
 /// frame count rebuilds every frame.
 Map<String, Object?> _traceReport(vm.Timeline t) {
   final Map<String, List<num>> by = <String, List<num>>{};
+  final Map<String, String> cat = <String, String>{};
   final Map<int, List<Map<String, dynamic>>> open =
       <int, List<Map<String, dynamic>>>{};
   int frames = 0;
-  void add(String name, num durUs) {
+  void add(String name, num durUs, Object? category) {
+    cat[name] ??= '${category ?? ''}';
     final List<num> v = by.putIfAbsent(name, () => <num>[0, 0]);
     v[0] += 1;
     v[1] += durUs / 1000;
@@ -226,14 +228,18 @@ Map<String, Object?> _traceReport(vm.Timeline t) {
       frames++;
     }
     if (ph == 'X') {
-      add(name, (j['dur'] as num?) ?? 0);
+      add(name, (j['dur'] as num?) ?? 0, j['cat']);
     } else if (ph == 'B') {
       open.putIfAbsent(tid, () => <Map<String, dynamic>>[]).add(j);
     } else if (ph == 'E') {
       final List<Map<String, dynamic>>? st = open[tid];
       if (st != null && st.isNotEmpty) {
         final Map<String, dynamic> b = st.removeLast();
-        add('${b['name']}', (j['ts'] as num) - (b['ts'] as num));
+        add(
+          '${b['name']}',
+          (j['ts'] as num) - (b['ts'] as num),
+          b['cat'],
+        );
       }
     }
   }
@@ -249,6 +255,7 @@ Map<String, Object?> _traceReport(vm.Timeline t) {
       for (final MapEntry<String, List<num>> e in top.take(40))
         <String, Object?>{
           'name': e.key,
+          'cat': cat[e.key],
           'n': e.value[0],
           'ms': double.parse(e.value[1].toStringAsFixed(2)),
         },
