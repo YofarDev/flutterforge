@@ -188,6 +188,7 @@ The template copies `.agents/` (the canonical skill source) and `AGENTS.md` into
 - **prepare-context** - Exports project files as `.txt` into a flat folder (`context-export/`) for external AI tools.
 - **play-store-aso** - Audits and rewrites a Google Play listing (competitors, keywords, copy, limits), then updates Play Console with approval.
 - **play-store-screenshots** - Localised store screenshots and feature graphic from real app captures, via the bundled Script4Me generator (`scripts/app_store_promo_generator.py`) and its automated QA.
+- **flutter-lowend-perf** - Low-end Android performance: a scripted profile-mode take on a real device (safe install guards), per-screen frame stats, widget-build traces, Rive per-animation cost (census + ablation), and fixes such as resting idle Rive loops and adaptive lite motion.
 
 These instructions are available immediately in generated projects instead of recreating them by hand.
 
