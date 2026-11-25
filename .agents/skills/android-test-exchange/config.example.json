@@ -2,11 +2,12 @@
   "subreddit": "AndroidClosedTesting",
   "my_app": {
     "name": "My App",
+    "pitch": "a one-line description of your app.",
     "package": "com.example.myapp",
     "group": "https://groups.google.com/g/my-app-testers",
     "web": "https://play.google.com/apps/testing/com.example.myapp",
     "android": "https://play.google.com/store/apps/details?id=com.example.myapp"
   },
-  "comment_template": "Tested {app}: joined the group, opted in and installed. {feedback} Screenshot attached, I'll keep it installed for 14 days.\n\nCould you test mine back? ({my_name})\n\nJoin Group: {my_group}\n\nWeb Link: {my_web}\n\nAndroid Link: {my_android}",
+  "comment_template": "Tested {app}: joined the group, opted in and installed. {feedback} Screenshot attached, I'll keep it installed for 14 days.\n\nCould you test mine back? \"{my_name}\": {my_pitch}\n\n1. Join the group: {my_group}\n2. Opt in: {my_web}\n3. Wait a few minutes (Play needs time after the opt-in), then install: {my_android}\n\nFeedback: on the app's Play Store page, scroll to \"You're a tester\" > \"Send private feedback\" (only I can see it). Anything helps, even one line!",
   "reddit_user": "your_reddit_username"
 }

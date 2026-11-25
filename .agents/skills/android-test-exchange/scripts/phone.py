@@ -241,10 +241,18 @@ def ascii_clean(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
 
 
-def links_block() -> str:
+def render_template(app: str, feedback: str) -> str:
     m = CONFIG["my_app"]
-    return (f"Could you test mine back? ({m['name']})\n\nJoin Group: {m['group']}\n\n"
-            f"Web Link: {m['web']}\n\nAndroid Link: {m['android']}")
+    return ascii_clean(CONFIG["comment_template"].format(
+        app=app, feedback=feedback.strip(), my_name=m["name"], my_pitch=m.get("pitch", "").strip(),
+        my_group=m["group"], my_web=m["web"], my_android=m["android"]))
+
+
+def links_block() -> str:
+    """The 'test mine back' part of the template (everything from 'Could you test mine back')."""
+    text = render_template("X", "")
+    i = text.find("Could you test mine back")
+    return text[i:] if i >= 0 else text
 
 
 def check_text(text: str) -> str | None:
@@ -258,10 +266,7 @@ def check_text(text: str) -> str | None:
 
 
 def cmd_draft(app: str, feedback: str, out: str) -> None:
-    m = CONFIG["my_app"]
-    text = CONFIG["comment_template"].format(app=app, feedback=feedback.strip(), my_name=m["name"],
-                                             my_group=m["group"], my_web=m["web"], my_android=m["android"])
-    text = ascii_clean(text)
+    text = render_template(app, feedback)
     Path(out).write_text(text + "\n")
     print(text)
 

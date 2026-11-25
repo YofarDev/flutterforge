@@ -18,7 +18,7 @@ SHOTS=<your scratchpad dir>
 ```
 Then run `$P status` (one call: wakes the phone, shows your app, the pending queue, last log lines). `LOCKED` → ask the user to unlock the phone, stop until they say so. Do not go looking for config files: `status` shows what you need.
 
-Files live in `~/.config/android-test-exchange/` (override: `ANDROID_TEST_EXCHANGE_HOME`), never in the skill folder (it is shared via FlutterForge). First use on a machine: copy `config.example.json` there as `config.json` and fill it in. Files: `config.json` (user's app + links + template + reddit user), `tested.tsv` (every package already handled, incl. skips), `pending.tsv` (opted in, not installed yet), `optin_wait.tsv` (opt-in said "App not available": waiting for Play, retried automatically), `fix_links.tsv` (old comments still needing a link fix). For a different app of the user, edit `my_app` in `config.json` first.
+Files live in `~/.config/android-test-exchange/` (override: `ANDROID_TEST_EXCHANGE_HOME`), never in the skill folder (it is shared via FlutterForge). First use on a machine: copy `config.example.json` there as `config.json` and fill it in. Files: `config.json` (user's app: name, one-line `pitch`, links; the comment template; reddit user), `tested.tsv` (every package already handled, incl. skips), `pending.tsv` (opted in, not installed yet), `optin_wait.tsv` (opt-in said "App not available": waiting for Play, retried automatically), `fix_links.tsv` (old comments still needing a link fix). For a different app of the user, edit `my_app` in `config.json` first.
 
 ## Rules
 
@@ -74,6 +74,8 @@ Three phases. Batch size = target count + ~30% (some get skipped), e.g. target 1
    $P draft "<App Name>" "<one or two sentences of specific feedback>" $SHOTS/<pkg>.txt
    $P comment <post_url> $SHOTS/<pkg>.txt $SHOTS/<pkg>_proof.png --post
    ```
+   - `draft` fills the user's template from `config.json`: your feedback, then "Could you test mine back?" with the app's pitch, the 3 numbered steps (join group, opt in, wait a few minutes then install), and how to send private feedback on Play. You only write the feedback; never edit the rest of the text.
+   - Feedback = 2 short sentences: one concrete thing that works well, one concrete improvement or bug. Example: "The filters (nearest, least busy, open now) and the 50 km expand button are clear. The location prompt appears before any search, so asking later would feel smoother."
    - `posted+verified, links render` → go on. `TYPING-UNVERIFIED` → the composer text didn't match the draft (IME drops): `$P look`, tap just before each wrong char, DEL + retype, tap Post yourself. `GROUP LINK NOT SEEN` → verify with `$P look`, fix via `edit`. `posted? NOT verified` → `$P look`, check the comment shows with the image.
    - `FAILED: Reddit says 'Something went wrong'` → Reddit is having issues, not you. `$P act Close`, `$P act Discard`, keep the txt/png, add the post to your "retry" list, continue with the next app; retry `comment` 10+ min later. After 2 failed retries, tell the user.
    - Never post from a web browser (no image upload there, typing drops characters).
