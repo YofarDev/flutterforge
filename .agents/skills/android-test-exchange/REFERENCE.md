@@ -14,7 +14,7 @@
 
 ## Google Groups / opt-in
 - "no Join button (member-or-open)" is fine: already a member or open group.
-- Opt-in "App not available" = email-list test, private group or unpublished: skip.
+- Opt-in "App not available" right after joining = Play hasn't seen the group join yet (10 min to hours). NOT a skip: it goes to `optin_wait.tsv`, `install_all` / `retry_optins` retry it (re-joining the group too), and the script itself logs it after 48 h. 2026-11-25: apps first logged as "not available" became testers on a retry an hour later. (Truly private / email-list tests just expire after 48 h.)
 - Group links in OUR comments must be `https://groups.google.com/g/<name>`. `/u/1/g/` is the user's own account index and breaks for others.
 
 ## Play Store install
@@ -32,7 +32,7 @@
 - Single newlines are collapsed: the template uses blank lines.
 - One image per comment. In edit mode, select-all + delete also deletes the image (so `edit`/`fix_link` re-attach one).
 - Verify from the profile: `https://www.reddit.com/user/<name>/comments/` shows your comments + image thumbnails.
-- Feed RSS can return 429: feed.py retries; if it keeps failing wait 5 min.
+- Feed 403 while signed in (2026-11-25, several times): a background `fetch()` from a stale reddit tab is refused until a real page load refreshes Reddit's cookies. `feed.py` reloads `/r/<sub>/new/` in the phone's Chrome twice before failing, and reads `<shreddit-app user-logged-in>` to tell `LOGGED-OUT` (ask the user) from `BLOCKED` (rate limit: wait 10 min, don't ask).
 
 ## Skips seen before
 Wear OS / watch faces, iOS-only, "send me your email", sign-in walls (Nightflare, Bajka), geo-locked (PuttPace, Payment Projections, WannaChat, whereto.cloud), email-list tests (HomeFit, Nexora), wants-a-Play-review (Grange: Horror Escape), ad-gated-forever-on-first-launch (BadCell free time 0:00).

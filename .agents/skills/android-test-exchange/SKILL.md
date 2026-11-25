@@ -18,12 +18,13 @@ SHOTS=<your scratchpad dir>
 ```
 Then run `$P status` (one call: wakes the phone, shows your app, the pending queue, last log lines). `LOCKED` → ask the user to unlock the phone, stop until they say so. Do not go looking for config files: `status` shows what you need.
 
-Files live in `~/.config/android-test-exchange/` (override: `ANDROID_TEST_EXCHANGE_HOME`), never in the skill folder (it is shared via FlutterForge). First use on a machine: copy `config.example.json` there as `config.json` and fill it in. Files: `config.json` (user's app + links + template + reddit user), `tested.tsv` (every package already handled, incl. skips), `pending.tsv` (opted in, not installed yet), `fix_links.tsv` (old comments still needing a link fix). For a different app of the user, edit `my_app` in `config.json` first.
+Files live in `~/.config/android-test-exchange/` (override: `ANDROID_TEST_EXCHANGE_HOME`), never in the skill folder (it is shared via FlutterForge). First use on a machine: copy `config.example.json` there as `config.json` and fill it in. Files: `config.json` (user's app + links + template + reddit user), `tested.tsv` (every package already handled, incl. skips), `pending.tsv` (opted in, not installed yet), `optin_wait.tsv` (opt-in said "App not available": waiting for Play, retried automatically), `fix_links.tsv` (old comments still needing a link fix). For a different app of the user, edit `my_app` in `config.json` first.
 
 ## Rules
 
 - **Pre-authorized, do not ask:** joining groups, opting in, installing, posting the proof comment on the post you are testing back. Keep going until the user interrupts or the target count is reached.
-- **Stop and ask the user** only for: locked phone, a page asking for a password/credentials/payment, a post wanting email/DM/APK sideload, a script crashing twice in a row.
+- **Stop and ask the user** only for: locked phone, a page asking for a password/credentials/payment, a post wanting email/DM/APK sideload, a script crashing twice in a row, `feed.py` printing `LOGGED-OUT`. Any other feed error is NOT a sign-in problem: never ask the user to sign in to Reddit unless `feed.py` printed `LOGGED-OUT`.
+- **"Not available" means WAIT, never skip.** Right after joining a group, Play's opt-in page says "App not available" for 10 min to a few hours. The scripts queue those apps in `optin_wait.tsv` and every `install_all` retries them; after 48 h the script logs them itself. Never log an app as skipped for "not available" yourself, and never remove rows from `optin_wait.tsv`.
 - **Never:** create accounts, sign in, accept tracking consent, rate/review on Play, reply to anyone else, comment on a post whose app you did not open, write a comment by hand (always `draft`).
 - **Batch, don't interleave:** Play takes 5-30 min to show an app after opt-in, so opt in to the whole batch FIRST, then install everything Play offers, then test the installed apps one at a time. Re-run `install_all` between apps to pick up late arrivals.
 - **Park, don't push:** an app `not-visible` 45+ min after opt-in (`install_all` flags it) → `log <pkg> <post> "skipped: never visible on Play"` and drop its row. A control dead after 3 attempts (Post/image button) = park that app and log it. Never idle-wait: test an installed app, or prep more, while Play propagates.
@@ -38,12 +39,18 @@ Files live in `~/.config/android-test-exchange/` (override: `ANDROID_TEST_EXCHAN
 Three phases. Batch size = target count + ~30% (some get skipped), e.g. target 10 → prep 13.
 
 1. **Opt in to the whole batch:** `$F --prep <N>` (~25 s per app; run with a 600000 ms timeout, or in two halves for N > 15)
-   Prints one line per post: `pkg  group-result  optin-result  post_url`, then the pending count.
+   Prints one line per post: `pkg  group-result  optin-result  post_url`, then the pending and waiting counts.
    - optin `tester` → queued in `pending.tsv` (with opt-in time).
-   - optin `not-available` → already logged as skipped by the script.
-   - Nothing printed → `$F --limit 80` to see more; if 0 `todo`, wait 10 min and retry.
-   - Feed source (since 2026-11): Reddit refuses `.rss` (404) and `.json` (403) even when signed in, and blocks anonymous requests from the home network. `feed.py` therefore loads the subreddit **HTML** inside the phone's Chrome (signed in to reddit.com as the user) over adb + DevTools (`adb forward tcp:9222 localabstract:chrome_devtools_remote`), follows the lazy-load partial for more pages, and fetches post pages for image posts. ~5 s for 40 posts. `phone Chrome fetch failed: ... (blocked...)` → Chrome's reddit session expired: ask the user to sign in to reddit.com in Chrome on the phone (never sign in yourself). The Reddit app's feed is invisible to uiautomator, so don't try to read posts there.
-2. **Install the batch:** `$P install_all` (one pass, ~5 s per not-visible app; Play downloads several at once). Prints one line per pending app:
+   - optin `not-available...` → queued in `optin_wait.tsv` by the script (NOT skipped). Nothing to do: `install_all` retries them.
+   - Nothing printed → `$F --limit 80` to see more; if 0 `todo`, run `$P retry_optins` (waiting apps), test what installs, retry the feed 10 min later.
+   - Feed errors (the script already reloaded reddit.com in the phone's Chrome twice before printing one):
+     | output starts with | what to do |
+     |---|---|
+     | `LOGGED-OUT` | the only case where you ask the user to sign in to reddit.com in Chrome on the phone (never sign in yourself) |
+     | `BLOCKED` | Reddit rate limit, user still signed in. Do NOT ask the user. Test installed apps / `$P install_all`, retry `feed.py` in 10 min. Tell the user only after 3 more failures (30+ min) |
+     | `FEED-ERROR` | `$P status` (locked? unplugged?), retry `feed.py` once |
+   - Feed source (since 2026-11): Reddit refuses `.rss` (404) and `.json` (403), and blocks anonymous requests from the home network. `feed.py` loads the subreddit **HTML** inside the phone's Chrome (signed in as the user) over adb + DevTools, ~5 s for 40 posts. A fetch from a stale tab can get 403 while the user is signed in; a real page load clears it, so the script reloads the page itself. The Reddit app's feed is invisible to uiautomator, so don't try to read posts there.
+2. **Install the batch:** `$P install_all` (one pass, ~5 s per not-visible app; Play downloads several at once). It first retries up to 5 apps from `optin_wait.tsv` (`optin-retry  tester ... -> pending.tsv` = it caught up and is installed in the same pass). Then it prints one line per pending app:
    | status | meaning |
    |---|---|
    | `installed` | ready: test it (step 3) |
@@ -72,7 +79,7 @@ Three phases. Batch size = target count + ~30% (some get skipped), e.g. target 1
    - Never post from a web browser (no image upload there, typing drops characters).
    - `REFUSED: ...` → fix the text with `draft`, never hand-edit links.
 6. **Log:** `$P log <pkg> <post_url> commented` (also removes its `pending.tsv` row; same for any `skipped: ...` log).
-7. `$P install_all` (picks up apps Play has published since), then the next installed app. When `pending.tsv` has no installed apps left and the target isn't reached: prep another batch.
+7. `$P install_all` (picks up apps Play has published since, and retries waiting opt-ins), then the next installed app. When `pending.tsv` has no installed apps left and the target isn't reached: run `$P retry_optins` (all waiting apps, ~20 s each), then `$P install_all`, then prep another batch if still short.
 
 Every ~5 apps: check replies with `$P open https://www.reddit.com/notifications --pkg com.reddit.frontpage` then `$P texts`. If a dev says the screenshot/link is wrong, tell the user in your report (do not reply).
 

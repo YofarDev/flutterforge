@@ -20,12 +20,18 @@ Usage: uv run python -I phone.py <command> [args]
   open <url> [--pkg P]       open a URL (optionally forcing an app package)
   join_group <url>           open Google Group and join it if a Join button exists
   optin <url>                open Play opt-in page and press "Become a tester"
+                             ("not-available" = Play not caught up yet: WAIT, never skip)
+  retry_optins [--max N]     retry opt-ins queued in optin_wait.tsv (due = last try 10+ min ago);
+                             testers move to pending.tsv. install_all already does 5 per pass
+  wait_optin <pkg> <post_url> <optin_url> [group_url]
+                             queue a hand-made not-available opt-in for automatic retries
   install <pkg> [--wait 90]  install from Play; prints installed / pending / error
   to_folder <pkg|label>... [--folder NAME] [--remove]
                              add installed apps to a Nova app-drawer folder named after today
                              ("21 Nov"; created if missing) via Nova Settings > Drawer groups
-  install_all [--wait M]     batch: start every install Play offers for pending.tsv (one pass,
-                             or repeat passes for up to M minutes); logs+drops incompatible apps
+  install_all [--wait M]     batch: retry up to 5 waiting opt-ins, then start every install Play
+                             offers for pending.tsv (one pass, or repeat passes for up to M
+                             minutes); logs+drops incompatible apps
   launch <pkg>
   type <text>                type text (newlines become Enter)
   comment <post_url> <text_file> <image> [--post]
@@ -267,6 +273,7 @@ def comment_visible() -> bool:
 def push_image(image: str) -> None:
     remote = f"/sdcard/Pictures/{Path(image).name}"
     adb("push", image, remote)
+    sh(f"touch {remote}")  # adb push keeps the host mtime; the picker sorts by it, so make it newest
     sh(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote}")
 
 
@@ -383,6 +390,9 @@ def cmd_status() -> None:
     print(f"pending ({len(rows)}):")
     for r in rows:
         print("  " + r)
+    waiting = wait_rows()
+    if waiting:
+        print(f"optin_wait ({len(waiting)}): opted in, Play not caught up yet; install_all retries them")
     if TESTED.exists():
         print("last logged:")
         for r in TESTED.read_text().strip().splitlines()[-5:]:
@@ -404,12 +414,11 @@ def cmd_wake() -> None:
     print("LOCKED: ask user to unlock the phone" if locked else "awake, unlocked, portrait")
 
 
-def cmd_join_group(url: str) -> None:
+def join_group(url: str) -> str:
     open_url(url)
     hit, ns = wait_nodes(["Join group", "Mark all as read", "conversations", "Leave group"], 12)
     if hit != "Join group":
-        print(f"no Join button ({'member-or-open' if hit else 'unknown'})")
-        return
+        return f"no Join button ({'member-or-open' if hit else 'unknown'})"
     before = screen_hash()
     tap_text("Join group", ns=ns)
     wait_change(before, 6)
@@ -417,19 +426,124 @@ def cmd_join_group(url: str) -> None:
     before = screen_hash()
     tap_text("Join group", last=True)
     wait_change(before, 6)
-    print("joined")
+    return "joined"
 
 
-def cmd_optin(url: str) -> None:
+def cmd_join_group(url: str) -> None:
+    print(join_group(url))
+
+
+NOT_AVAILABLE_MSG = ("not-available: Play has not seen the group join yet. NORMAL right after joining "
+                     "(takes 10 min to a few hours). NOT a skip: feed.py --prep queues it in optin_wait.tsv "
+                     "and install_all retries it. Opted in by hand? run `wait_optin <pkg> <post_url> <optin_url> [group_url]`")
+
+
+def optin(url: str) -> str:
+    """tester | not-available | optin-failed"""
     open_url(url)
     hit, ns = wait_nodes(["App not available", "You are a tester", "Become a tester"], 15)
     if hit == "App not available":
-        print("not-available: email-list test, private group or unpublished -> skip (or join group then retry)")
-        return
+        return "not-available"
     if hit == "Become a tester":
         tap_text("Become a tester", exact=True, ns=ns)
         hit = wait_text(["You are a tester"], 10)
-    print("tester" if hit == "You are a tester" else "optin-failed (check screenshot)")
+    return "tester" if hit == "You are a tester" else "optin-failed"
+
+
+def cmd_optin(url: str) -> None:
+    r = optin(url)
+    print({"not-available": NOT_AVAILABLE_MSG, "optin-failed": "optin-failed (check screenshot)"}.get(r, r))
+
+
+# ---- opt-in wait queue: "App not available" right after joining the group is Play propagation,
+# not a dead app (2026-11-25: 4 of ~47 such apps turned into testers on a retry an hour later).
+# Rows: pkg, post, title, optin_url, group_url, first_try, last_try, tries  (times: %Y-%m-%d %H:%M)
+OPTIN_WAIT = DATA_DIR / "optin_wait.tsv"
+OPTIN_RETRY_GAP_MIN = 10      # retry a row at most every 10 min
+OPTIN_GIVE_UP_HOURS = 48      # then log it as skipped
+
+
+def wait_rows() -> list[list[str]]:
+    if not OPTIN_WAIT.exists():
+        return []
+    return [r.split("\t") for r in OPTIN_WAIT.read_text().splitlines() if r.strip()]
+
+
+def write_wait_rows(rows: list[list[str]]) -> None:
+    OPTIN_WAIT.write_text("".join("\t".join(r) + "\n" for r in rows))
+
+
+def queue_optin(pkg: str, post: str, title: str, optin_url: str, group: str) -> None:
+    """Add (or keep) a not-available opt-in in the wait queue."""
+    rows = wait_rows()
+    if any(r[0] == pkg for r in rows):
+        return
+    now = f"{datetime.now():%Y-%m-%d %H:%M}"
+    rows.append([pkg, post, title.replace("\t", " ")[:120], optin_url, group or "", now, now, "1"])
+    write_wait_rows(rows)
+
+
+def minutes_since(ts: str) -> float:
+    try:
+        return (datetime.now() - datetime.strptime(ts, "%Y-%m-%d %H:%M")).total_seconds() / 60
+    except ValueError:
+        return 1e9
+
+
+def add_pending(pkg: str, post: str, title: str) -> None:
+    if any(r[0] == pkg for r in pending_rows()):
+        return
+    with PENDING.open("a") as f:
+        f.write(f"{pkg}\t{post}\t{title}\t{datetime.now():%Y-%m-%d %H:%M}\n")
+
+
+def retry_optins(max_n: int | None = None) -> tuple[int, int]:
+    """Retry due rows of optin_wait.tsv (oldest attempt first). tester -> moved to pending.tsv.
+    Returns (became_tester, still_waiting)."""
+    rows = wait_rows()
+    due = sorted((r for r in rows if minutes_since(r[6]) >= OPTIN_RETRY_GAP_MIN), key=lambda r: r[6])
+    if max_n is not None:
+        due = due[:max_n]
+    won = 0
+    for r in due:
+        pkg, post, title, url, group = r[0], r[1], r[2], r[3], r[4]
+        if is_installed(pkg):
+            res = "tester"
+        else:
+            if group:
+                join_group(group)  # idempotent; a lost join is a common cause of not-available
+            res = optin(url)
+        waited = int(minutes_since(r[5]))
+        if res == "tester":
+            add_pending(pkg, post, title)
+            rows = [x for x in rows if x[0] != pkg]
+            won += 1
+            print(f"optin-retry  tester         {pkg}  (after {waited} min) -> pending.tsv")
+        elif waited >= OPTIN_GIVE_UP_HOURS * 60:
+            rows = [x for x in rows if x[0] != pkg]
+            with TESTED.open("a") as f:
+                f.write(f"{datetime.now():%Y-%m-%d %H:%M}\t{pkg}\t{post}\t"
+                        f"skipped: opt-in still not available after {OPTIN_GIVE_UP_HOURS}h\n")
+            print(f"optin-retry  gave-up        {pkg}  (not available for {OPTIN_GIVE_UP_HOURS}h, logged)")
+        else:
+            r[6] = f"{datetime.now():%Y-%m-%d %H:%M}"
+            r[7] = str(int(r[7]) + 1 if r[7].isdigit() else 1)
+            print(f"optin-retry  still-waiting  {pkg}  (waiting {waited} min, try {r[7]})")
+    write_wait_rows(rows)
+    if due:
+        sh("input keyevent KEYCODE_HOME")
+    return won, len(rows)
+
+
+def cmd_retry_optins(max_n: int | None) -> None:
+    rows = wait_rows()
+    if not rows:
+        print("optin_wait.tsv is empty")
+        return
+    not_due = sum(1 for r in rows if minutes_since(r[6]) < OPTIN_RETRY_GAP_MIN)
+    won, left = retry_optins(max_n)
+    print(f"\n{won} became testers (now in pending.tsv: run install_all). {left} still waiting"
+          + (f" ({not_due} not retried: last try < {OPTIN_RETRY_GAP_MIN} min ago)." if not_due else "."))
 
 
 def cmd_install(pkg: str, wait: int = 90) -> None:
@@ -527,6 +641,9 @@ def cmd_install_all(wait_min: float = 0) -> None:
     (every ~60 s, only for apps not yet started) until all are installed or M minutes pass.
     Installed apps STAY in pending.tsv (their post URL is needed to comment); drop them
     with `log ... commented` + removing the row, as in the main loop."""
+    if wait_rows():  # first, promote opt-ins Play has caught up on (up to 5 per pass, ~20 s each)
+        won, left = retry_optins(max_n=5)
+        print(f"optin_wait: {won} became testers, {left} still waiting (retried automatically on every install_all)\n")
     deadline = time.time() + wait_min * 60
     state: dict[str, str] = {}
     while True:
@@ -586,14 +703,22 @@ def cmd_comment(post_url: str, text_file: str, image: str, post: bool) -> None:
         return
     time.sleep(2)
     type_text(text)
-    miss = first_missing([text[:25]])  # opening words must be readable in the field
+    miss = first_missing([text[-25:]])  # the composer scrolls, so check the tail (cursor end)
     if miss:  # one clear + slower retype
         sh("input keycombination 113 29")
         time.sleep(1)
         sh("input keyevent KEYCODE_DEL")
         time.sleep(1)
         type_text(text, pause=0.45)
-        miss = first_missing([text[:25]])
+        miss = first_missing([text[-25:]])
+    if miss and not any(len(n[0]) >= 60 for n in nodes()):
+        # Reddit composer does not expose its text to uiautomator (2026-11): the typed text
+        # cannot be checked here. Attach the image, then stop before Post so a screenshot
+        # check decides it (look, then `act Post --exact`).
+        attach_image()
+        print("UNCHECKED-TEXT: typed, but the composer text is not readable by uiautomator. "
+              "Check the composer with `look` (full text and image), then tap Post yourself.")
+        return
     if miss:
         print(f"TYPING-UNVERIFIED: {miss[:40]!r} not visible in the composer. Run `look`, fix by "
               "tapping just before the wrong char (DEL + retype); cursor keys do not work there.")
@@ -896,7 +1021,10 @@ def cmd_to_folder(targets: list[str], folder: str, tick: bool = True) -> None:
 def cmd_log(pkg: str, post: str, note: str) -> None:
     with TESTED.open("a") as f:
         f.write(f"{datetime.now():%Y-%m-%d %H:%M}\t{pkg}\t{post}\t{note}\n")
-    if any(r[0] == pkg for r in pending_rows()):
+    if any(r[0] == pkg for r in wait_rows()):
+        write_wait_rows([r for r in wait_rows() if r[0] != pkg])
+        print("logged (removed from optin_wait.tsv)")
+    elif any(r[0] == pkg for r in pending_rows()):
         drop_pending(pkg)
         print("logged (removed from pending.tsv)")
     else:
@@ -950,6 +1078,11 @@ def main() -> None:
         cmd_join_group(a[1])
     elif c == "optin":
         cmd_optin(a[1])
+    elif c == "retry_optins":
+        cmd_retry_optins(int(a[a.index("--max") + 1]) if "--max" in a else None)
+    elif c == "wait_optin":
+        queue_optin(a[1], a[2], "", a[3], a[4] if len(a) > 4 else "")
+        print(f"queued in optin_wait.tsv ({len(wait_rows())} waiting)")
     elif c == "to_folder":
         folder = a[a.index("--folder") + 1] if "--folder" in a else session_folder()
         targets = [x for i, x in enumerate(a[1:], 1) if x not in ("--folder", "--remove") and a[i - 1] != "--folder"]

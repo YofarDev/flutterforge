@@ -29,6 +29,7 @@ if not (DATA_DIR / "config.json").exists():
 CONFIG = json.loads((DATA_DIR / "config.json").read_text())
 TESTED = DATA_DIR / "tested.tsv"
 PENDING = DATA_DIR / "pending.tsv"  # opted in, waiting for install
+OPTIN_WAIT = DATA_DIR / "optin_wait.tsv"  # opt-in said "App not available": retried by phone.py
 NS = {"a": "http://www.w3.org/2005/Atom"}
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 Chrome/130 Safari/537.36"
 
@@ -54,14 +55,16 @@ def fetch(limit: int, source: str = "auto") -> list[dict]:
     Since 2026-11 Reddit refuses .rss (404) and .json (403) even to a signed-in browser,
     and blocks anonymous requests from the home network entirely. What still works: the
     subreddit HTML page, loaded inside the phone's Chrome (signed in to reddit.com) over
-    adb + DevTools. Direct RSS is kept only as a fallback in case Reddit reopens it."""
+    adb + DevTools. Direct RSS (`--source direct`) is kept only in case Reddit reopens it:
+    it is no longer tried automatically (its 404/429 errors misled agents into "signed out")."""
     if source in ("auto", "phone"):
         try:
             return fetch_html_via_phone(limit)
+        except FeedBlocked as e:
+            sys.exit(str(e))
         except Exception as e:
-            if source == "phone":
-                sys.exit(f"phone Chrome fetch failed: {e}")
-            print(f"phone Chrome fetch failed ({e}); trying direct RSS", file=sys.stderr)
+            sys.exit(f"FEED-ERROR: phone Chrome fetch failed ({e}). Run `phone.py status` "
+                     "(phone locked? unplugged?), then retry feed.py once. NOT a sign-in problem.")
     url = f"https://www.reddit.com/r/{CONFIG['subreddit']}/new/.rss?limit={limit}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -121,26 +124,59 @@ def rtjson_body(page: str, pid: str) -> str:
     return html.unescape(page[page.find(">", start) + 1: end if end > 0 else start + 20000])
 
 
+class FeedBlocked(Exception):
+    """Reddit refused the feed even after reloading the page in the phone's Chrome."""
+
+
+# Seconds to let the freshly loaded reddit page settle before each retry. A background fetch() from
+# a stale reddit tab gets 403 while the user is still signed in (seen 2026-11-25, several times);
+# a real page load in Chrome (what the user does by opening reddit.com) refreshes Reddit's
+# session/bot-check cookies and the fetch works again. So: reload, then retry, BEFORE blaming sign-in.
+RELOAD_WAITS = (4, 15)
+
+
 def fetch_html_via_phone(limit: int) -> list[dict]:
     sub = CONFIG["subreddit"]
-    # one round trip: page 1, then follow the lazy-load partial until `limit` posts or 10 pages
+    feed_path = f"/r/{sub}/new/"
+    # one round trip: page 1, then follow the lazy-load partial until `limit` posts or 10 pages.
+    # Also reports the page's sign-in flag (<shreddit-app user-logged-in="true">).
     expr = """(async () => {
+      const app = document.querySelector('shreddit-app');
+      const loggedIn = app ? app.getAttribute('user-logged-in') : null;
       const chunks = []; let url = %s, n = 0;
       for (let page = 0; page < 10 && url && n < %d; page++) {
         const r = await fetch(url, {credentials: 'include'});
-        if (r.status !== 200) return JSON.stringify({status: r.status, chunks});
+        if (r.status !== 200) return JSON.stringify({status: r.status, chunks, loggedIn});
         const t = await r.text(); chunks.push(t);
         n += (t.match(/<shreddit-post\\s/g) || []).length;
         const m = t.match(/src="(\\/svc\\/shreddit\\/community-more-posts\\/new\\/[^"]+)"/);
         url = m ? m[1].replace(/&amp;/g, '&') : null;
       }
-      return JSON.stringify({status: 200, chunks});
-    })()""" % (json.dumps(f"/r/{sub}/new/"), limit)
-    res = json.loads(eval_in_phone_chrome(expr))
-    posts = html_entries(res["chunks"])[:limit]
+      return JSON.stringify({status: 200, chunks, loggedIn});
+    })()""" % (json.dumps(feed_path), limit)
+    res: dict = {}
+    posts: list[dict] = []
+    for attempt in range(len(RELOAD_WAITS) + 1):
+        if attempt:
+            print(f"feed: HTTP {res.get('status')} -> reloading reddit.com{feed_path} in phone Chrome "
+                  f"(retry {attempt}/{len(RELOAD_WAITS)})", file=sys.stderr)
+            reload_reddit_tab(f"https://www.reddit.com{feed_path}", RELOAD_WAITS[attempt - 1])
+        res = json.loads(eval_in_phone_chrome(expr))
+        posts = html_entries(res["chunks"])[:limit]
+        if posts:
+            break
     if not posts:
-        hint = " (blocked: sign in to reddit.com in Chrome on the phone)" if res["status"] in (403, 404, 429) else ""
-        raise RuntimeError(f"HTTP {res['status']}, no posts parsed{hint}")
+        if res.get("loggedIn") == "false":
+            raise FeedBlocked(
+                "LOGGED-OUT: reddit.com in the phone's Chrome shows signed out (checked after reloading the "
+                "page twice). Ask the user to sign in to reddit.com in Chrome on the phone (never sign in "
+                "yourself), then retry.")
+        raise FeedBlocked(
+            f"BLOCKED (HTTP {res.get('status')}), but the user is NOT signed out "
+            f"(page sign-in flag: {res.get('loggedIn')}). Reloading the page twice did not clear it: Reddit is "
+            "rate-limiting. Do NOT ask the user to sign in. Meanwhile: test installed apps "
+            "(`phone.py install_all`), and retry feed.py in 10 min. Tell the user only after 3 more "
+            "failed retries (30+ min).")
     # image/gallery/link posts carry no body in the listing: load their post pages (one parallel batch)
     bare = [p for p in posts if not RE_TESTING.search(p["body_html"]) and not RE_DETAILS.search(p["body_html"])]
     if bare:
@@ -222,10 +258,11 @@ def _cdp_http(path: str, method: str = "GET"):
         return json.loads(r.read())
 
 
-def eval_in_phone_chrome(expr: str) -> str:
-    """Evaluate a JS expression (may return a Promise of a string) inside a reddit.com tab of
-    the phone's Chrome, so requests carry the user's own reddit session and the phone's
-    browser fingerprint. The session never leaves the phone; we only read the result."""
+def _reddit_tab() -> dict:
+    """The phone Chrome tab used for reddit requests, brought to the front (created if missing).
+    New tabs open on the real subreddit page (a full reddit page load, not robots.txt: only a real
+    page refreshes Reddit's session/bot-check cookies)."""
+    home = f"https://www.reddit.com/r/{CONFIG['subreddit']}/new/"
     subprocess.run([*adb_base(), "forward", f"tcp:{CDP_PORT}", "localabstract:chrome_devtools_remote"],
                    capture_output=True, timeout=10, check=True)
     try:
@@ -233,32 +270,62 @@ def eval_in_phone_chrome(expr: str) -> str:
     except Exception:
         # Chrome not running: start it on reddit.com, then retry once
         subprocess.run([*adb_base(), "shell", "am", "start", "-a", "android.intent.action.VIEW",
-                        "-d", "https://www.reddit.com/robots.txt", "-p", "com.android.chrome"],
+                        "-d", home, "-p", "com.android.chrome"],
                        capture_output=True, timeout=10)
-        time.sleep(4)
+        time.sleep(6)
         tabs = _cdp_http("/json/list")
     # Android freezes a backgrounded Chrome / background tab (CDP calls then time out):
     # bring Chrome to the front and activate the reddit tab first.
     subprocess.run([*adb_base(), "shell", "monkey", "-p", "com.android.chrome", "-c",
                     "android.intent.category.LAUNCHER", "1"], capture_output=True, timeout=15)
-    tab = next((t for t in tabs if t.get("type") == "page" and t.get("url", "").startswith("https://www.reddit.com/")), None)
+    tab = next((t for t in tabs if t.get("type") == "page" and t.get("url", "").startswith("https://www.reddit.com/")
+                and "robots.txt" not in t.get("url", "")), None)
     if tab is None:
-        tab = _cdp_http("/json/new?https://www.reddit.com/robots.txt", method="PUT")
-        time.sleep(3)
+        tab = _cdp_http(f"/json/new?{home}", method="PUT")
+        time.sleep(6)
     else:
         req = urllib.request.Request(f"http://127.0.0.1:{CDP_PORT}/json/activate/{tab['id']}")
         urllib.request.urlopen(req, timeout=10).read()
         time.sleep(1)
+    return tab
+
+
+def _cdp_call(tab: dict, method: str, params: dict) -> dict:
     s = _ws_connect(tab["webSocketDebuggerUrl"].replace("localhost", "127.0.0.1"))
     try:
-        _ws_send(s, json.dumps({"id": 1, "method": "Runtime.evaluate",
-                                "params": {"expression": expr, "awaitPromise": True, "returnByValue": True}}))
+        _ws_send(s, json.dumps({"id": 1, "method": method, "params": params}))
         while True:
             msg = json.loads(_ws_recv(s))
             if msg.get("id") == 1:
-                break
+                return msg
     finally:
         s.close()
+
+
+def reload_reddit_tab(url: str, settle: float) -> None:
+    """Load `url` as a real page in the phone's Chrome reddit tab (same as the user opening
+    reddit.com), wait for it to finish loading, then `settle` more seconds."""
+    tab = _reddit_tab()
+    _cdp_call(tab, "Page.navigate", {"url": url})
+    end = time.time() + 25
+    time.sleep(2)
+    while time.time() < end:
+        try:
+            r = _cdp_call(tab, "Runtime.evaluate", {"expression": "document.readyState", "returnByValue": True})
+            if r.get("result", {}).get("result", {}).get("value") == "complete":
+                break
+        except Exception:
+            pass  # navigation in progress
+        time.sleep(1)
+    time.sleep(settle)
+
+
+def eval_in_phone_chrome(expr: str) -> str:
+    """Evaluate a JS expression (may return a Promise of a string) inside a reddit.com tab of
+    the phone's Chrome, so requests carry the user's own reddit session and the phone's
+    browser fingerprint. The session never leaves the phone; we only read the result."""
+    msg = _cdp_call(_reddit_tab(), "Runtime.evaluate",
+                    {"expression": expr, "awaitPromise": True, "returnByValue": True})
     res = msg.get("result", {})
     if "exceptionDetails" in res:
         raise RuntimeError(res["exceptionDetails"].get("exception", {}).get("description", "JS exception")[:200])
@@ -302,6 +369,7 @@ def age(ts: str) -> str:
 
 def parse(entries: list[dict]) -> list[dict]:
     inst, tested, pending = installed_packages(), tested_packages(), pkgs_in(PENDING, 0)
+    waiting = pkgs_in(OPTIN_WAIT, 0)
     mine = CONFIG["my_app"]["package"]
     posts, seen = [], set()
     for e in entries:
@@ -332,6 +400,8 @@ def parse(entries: list[dict]) -> list[dict]:
             status = "duplicate"
         elif pkg in pending:
             status = "pending"
+        elif pkg in waiting:
+            status = "waiting"
         if pkg:
             seen.add(pkg)
         posts.append({
@@ -356,7 +426,8 @@ def main() -> None:
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--prep", type=int, default=0, help="join group + opt in for the N newest todo posts")
     ap.add_argument("--source", choices=["auto", "phone", "direct"], default="auto",
-                    help="auto = phone Chrome (signed in) then direct RSS")
+                    help="auto/phone = phone Chrome (signed in; reloads the page on 403); "
+                         "direct = anonymous RSS (blocked by Reddit since 2026-11)")
     a = ap.parse_args()
     posts = parse(fetch(a.limit, a.source))
     if a.prep:
@@ -370,11 +441,14 @@ def main() -> None:
                 with PENDING.open("a") as f:
                     f.write(f"{p['package']}\t{p['post']}\t{p['title']}\t{datetime.now():%Y-%m-%d %H:%M}\n")
             elif o.startswith("not-available"):
-                run("log", p["package"], p["post"], "skipped: opt-in not available")
+                # Play propagation, not a dead app: queue it, install_all retries it every 10+ min
+                run("wait_optin", p["package"], p["post"], p["optin"], p["group"] or "")
         n = sum(1 for l in PENDING.read_text().splitlines() if l.strip()) if PENDING.exists() else 0
-        print(f"\npending.tsv: {n} opted in. Next: `phone.py install_all`")
+        w = len(pkgs_in(OPTIN_WAIT, 0))
+        print(f"\npending.tsv: {n} opted in. optin_wait.tsv: {w} waiting for Play (NOT skipped: "
+              "install_all retries them automatically). Next: `phone.py install_all`")
         return
-    shown = posts if a.all else [p for p in posts if p["status"] in ("todo", "pending")]
+    shown = posts if a.all else [p for p in posts if p["status"] in ("todo", "pending", "waiting")]
     if a.json:
         print(json.dumps(shown, indent=1, ensure_ascii=False))
         return
