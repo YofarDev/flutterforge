@@ -45,6 +45,9 @@ Usage: uv run python -I phone.py <command> [args]
   fix_link <app_name> <proof.png> [--save]
                              fix the old /u/1/ group link in my comment "Tested <app_name>: ..."
   log <pkg> <post_url> <note>  append to tested.tsv
+  uninstall_expired [--days 14] [--skipped] [--apply]
+                             list (dry run) / uninstall tested apps whose first `commented` log is
+                             14+ days old; --skipped also removes installed apps that were only skipped
 
 Device pinning: one adb device is auto-picked on first use and cached in .device_serial
 (next to config.json). ANDROID_SERIAL env overrides; delete .device_serial to re-pin.
@@ -58,7 +61,7 @@ import shlex
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -1023,6 +1026,59 @@ def cmd_to_folder(targets: list[str], folder: str, tick: bool = True) -> None:
     print(f"folder '{folder}' now: {summary or '?'}")
 
 
+def cmd_uninstall_expired(days: float, include_skipped: bool, apply: bool) -> None:
+    """Uninstall tested apps whose 14-day promise is over (first `commented` log >= `days` ago).
+    With include_skipped, also apps that were only ever skipped (no promise made). Dry run unless apply."""
+    first_commented: dict[str, datetime] = {}
+    skipped_only: dict[str, str] = {}
+    for line in (TESTED.read_text().splitlines() if TESTED.exists() else []):
+        f = line.split("\t")
+        if len(f) < 4:
+            continue
+        try:
+            ts = datetime.strptime(f[0], "%Y-%m-%d %H:%M")
+        except ValueError:
+            continue  # malformed row
+        pkg, note = f[1], f[3]
+        if note.startswith("commented"):
+            first_commented[pkg] = min(ts, first_commented.get(pkg, ts))
+            skipped_only.pop(pkg, None)
+        elif note.startswith("skipped") and pkg not in first_commented:
+            skipped_only[pkg] = note
+    installed = {l.split(":", 1)[1].strip() for l in sh("pm list packages -3").splitlines() if l.startswith("package:")}
+    if not installed:
+        print("NO DEVICE (or no apps listed): connect the phone, check `adb devices`, then rerun.")
+        return
+    installed.discard(CONFIG["my_app"]["package"])
+    now = datetime.now()
+    due: list[tuple[str, str]] = []
+    waiting: list[tuple[str, datetime]] = []
+    for pkg, ts in sorted(first_commented.items(), key=lambda kv: kv[1]):
+        if pkg not in installed:
+            continue
+        age = (now - ts).total_seconds() / 86400
+        if age >= days:
+            due.append((pkg, f"commented {ts:%Y-%m-%d} ({age:.0f} days ago)"))
+        else:
+            waiting.append((pkg, ts))
+    if include_skipped:
+        due += [(pkg, note[:60]) for pkg, note in sorted(skipped_only.items()) if pkg in installed]
+    for pkg, why in due:
+        if apply:
+            res = sh(f"pm uninstall {pkg}").strip() or "?"
+            print(f"{'uninstalled' if res == 'Success' else 'FAILED (' + res + ')':14} {pkg}  {why}")
+        else:
+            print(f"would remove   {pkg}  {why}")
+    if waiting:
+        print(f"\nkept ({len(waiting)}, promise not over yet):")
+        for pkg, ts in waiting:
+            print(f"  {pkg}  commented {ts:%Y-%m-%d}, free from {ts + timedelta(days=days):%Y-%m-%d %H:%M}")
+    if not due:
+        print("nothing to uninstall")
+    elif not apply:
+        print(f"\nDRY RUN: {len(due)} apps. Re-run with --apply to uninstall them.")
+
+
 def cmd_log(pkg: str, post: str, note: str) -> None:
     with TESTED.open("a") as f:
         f.write(f"{datetime.now():%Y-%m-%d %H:%M}\t{pkg}\t{post}\t{note}\n")
@@ -1108,6 +1164,9 @@ def main() -> None:
         cmd_draft(a[1], a[2], a[3])
     elif c == "fix_link":
         cmd_fix_link(a[1], a[2], "--save" in a)
+    elif c == "uninstall_expired":
+        cmd_uninstall_expired(float(a[a.index("--days") + 1]) if "--days" in a else 14,
+                              "--skipped" in a, "--apply" in a)
     elif c == "log":
         cmd_log(a[1], a[2], a[3] if len(a) > 3 else "")
     else:

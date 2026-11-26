@@ -85,6 +85,10 @@ Three phases. Batch size = target count + ~30% (some get skipped), e.g. target 1
 
 Every ~5 apps: check replies with `$P open https://www.reddit.com/notifications --pkg com.reddit.frontpage` then `$P texts`. If a dev says the screenshot/link is wrong, tell the user in your report (do not reply).
 
+## Clean up: uninstall apps after 14 days
+
+Only when the user asks. `$P uninstall_expired` is a dry run: it lists installed apps whose first `commented` log is 14+ days old, and the apps still kept with the date each one is free. Show the user that list, then run it again with `--apply` only after they say yes. `--skipped` also removes installed apps that were only ever skipped (no promise made); `--days N` changes the delay. It only touches packages in `tested.tsv`, never the user's own app.
+
 ## Open task: fix old links
 
 `fix_links.tsv` lists comments posted with a broken group link (`groups.google.com/u/1/g/...`). Do these when the user asks, or before the loop if they say "fix the links". For each row (`pkg  app_name  post`):
