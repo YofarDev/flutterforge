@@ -13,9 +13,10 @@
 #   ./fbuild.sh --android --flavor dev     # dev-flavored appbundle only
 #   FBUILD_OUT_DIR=dist ./fbuild.sh
 #
-# With a flavor, the flavor is passed to `flutter build`, the Android bundle is
-# collected from the flavored output dir, and the flavor is included in
-# artifact names: <project>-<flavor>-<version>+<build>-<platform>.<ext>.
+# With a flavor, the flavor is passed to `flutter build`, the Android bundle
+# is located the way the flutter tool itself finds it (variant dir like
+# bundle/devRelease/, case-tolerant), and the flavor is included in artifact
+# names: <project>-<flavor>-<version>+<build>-<platform>.<ext>.
 # =============================================================================
 
 set -e
@@ -72,15 +73,13 @@ if [ -n "$FLAVOR" ] && ! echo "$FLAVOR" | grep -qE '^[A-Za-z0-9_]+$'; then
     error_exit "Invalid flavor name: '$FLAVOR' (allowed: letters, digits, underscores)."
 fi
 
-# Passed to `flutter build` (empty when no flavor), and the suffix added to
-# artifact names / the Android output dir the bundle is collected from.
+# Passed to `flutter build` (empty when no flavor) and added to artifact
+# names.
 FLAVOR_ARGS=()
 FLAVOR_TAG=""
-ANDROID_BUNDLE_DIR="build/app/outputs/bundle/release/"
 if [ -n "$FLAVOR" ]; then
     FLAVOR_ARGS=(--flavor "$FLAVOR")
     FLAVOR_TAG="-$FLAVOR"
-    ANDROID_BUNDLE_DIR="build/app/outputs/bundle/$FLAVOR/release/"
 fi
 
 DOWNLOADS_DIR="${FBUILD_OUT_DIR:-$HOME/Downloads}"
@@ -117,11 +116,18 @@ grep -q "^$NEW_VERSION_LINE\$" "$PUBSPEC_FILE" || \
 # -- 2. Build and collect artifacts --------------------------------------------
 # Artifacts are named <project>[-<flavor>]-<version>+<build>-<platform>.<ext>.
 # Existing destination files are NEVER silently overwritten — the build is
-# refused.
+# refused. The optional 5th arg is a find -ipath filter: flavored bundles land
+# in a variant dir (bundle/<flavor>Release/, no release/ subdir) whose casing
+# varies with the Android Gradle plugin, so they are matched case-insensitively
+# on the parent dir — the same way the flutter tool locates them.
 collect_artifact() {
-    local dir="$1" pattern="$2" platform="$3" ext="$4"
+    local dir="$1" pattern="$2" platform="$3" ext="$4" path_glob="${5:-}"
     local file target
-    file=$(find "$dir" -name "$pattern" -print -quit 2>/dev/null || true)
+    if [ -n "$path_glob" ]; then
+        file=$(find "$dir" -type f -ipath "$path_glob" -name "$pattern" -print -quit 2>/dev/null || true)
+    else
+        file=$(find "$dir" -name "$pattern" -print -quit 2>/dev/null || true)
+    fi
     if [ -f "$file" ]; then
         target="$DOWNLOADS_DIR/${PROJECT_NAME}${FLAVOR_TAG}-${VERSION}+${NEW_BUILD_NUMBER}-${platform}.${ext}"
         if [ -e "$target" ]; then
@@ -137,7 +143,11 @@ collect_artifact() {
 if [ "$BUILD_ANDROID" = true ]; then
     echo "Building App Bundle${FLAVOR:+ (flavor: $FLAVOR)}..."
     flutter build appbundle "${FLAVOR_ARGS[@]}" || error_exit "flutter build appbundle failed."
-    collect_artifact "$ANDROID_BUNDLE_DIR" "*.aab" android aab
+    if [ -n "$FLAVOR" ]; then
+        collect_artifact "build/app/outputs/bundle/" "*.aab" android aab "*${FLAVOR}release*"
+    else
+        collect_artifact "build/app/outputs/bundle/release/" "*.aab" android aab
+    fi
 fi
 
 if [ "$BUILD_IOS" = true ]; then

@@ -107,7 +107,8 @@ def main() -> None:
         sys.exit("REFUSED: --package equals --real-package")
     defines = [f"--dart-define={a.id_define}", *[f"--dart-define={d}" for d in a.define]]
     flavor = ["--flavor", a.flavor] if a.flavor else []
-    apk = Path(f"build/app/outputs/flutter-apk/app-{a.flavor + '-' if a.flavor else ''}profile.apk")
+    # flutter copies the APK to flutter-apk/ with the lowercased flavor name.
+    apk = Path(f"build/app/outputs/flutter-apk/app-{a.flavor.lower() + '-' if a.flavor else ''}profile.apk")
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
