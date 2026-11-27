@@ -94,6 +94,7 @@ def main() -> None:
     p.add_argument("--driver", default="test_driver/perf_driver.dart")
     p.add_argument("--define", action="append", default=[], help="K=V, repeatable")
     p.add_argument("--id-define", default="PERF_CAPTURE=true", help="define that switches the app id suffix")
+    p.add_argument("--flavor", help="Android product flavor (apps with productFlavors)")
     p.add_argument("--tag", default="take")
     p.add_argument("--out", default="build/perf")
     p.add_argument("--no-build", action="store_true", help="reuse the last APK (still id-checked)")
@@ -105,7 +106,8 @@ def main() -> None:
     if a.real_package and a.real_package == a.package:
         sys.exit("REFUSED: --package equals --real-package")
     defines = [f"--dart-define={a.id_define}", *[f"--dart-define={d}" for d in a.define]]
-    apk = Path("build/app/outputs/flutter-apk/app-profile.apk")
+    flavor = ["--flavor", a.flavor] if a.flavor else []
+    apk = Path(f"build/app/outputs/flutter-apk/app-{a.flavor + '-' if a.flavor else ''}profile.apk")
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -123,8 +125,9 @@ def main() -> None:
 
     # 2. build
     if not a.no_build:
-        print("build:", " ".join(["flutter", "build", "apk", "--profile", f"--target={a.target}", *defines]), flush=True)
-        sh(["flutter", "build", "apk", "--profile", f"--target={a.target}", *defines], capture=True)
+        build = ["flutter", "build", "apk", "--profile", *flavor, f"--target={a.target}", *defines]
+        print("build:", " ".join(build), flush=True)
+        sh(build, capture=True)
 
     # 3. id guard
     pkg = apk_package(apk)
@@ -150,7 +153,7 @@ def main() -> None:
     resp.unlink(missing_ok=True)
     started = time.time()
     log = out / f"{a.tag}.log"
-    cmd = ["flutter", "drive", "--profile", "--no-dds", "-d", device,
+    cmd = ["flutter", "drive", "--profile", *flavor, "--no-dds", "-d", device,
            f"--use-application-binary={apk}", "--keep-app-running",
            f"--driver={a.driver}", f"--target={a.target}", *defines]
     print("drive:", " ".join(cmd), flush=True)

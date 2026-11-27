@@ -74,13 +74,24 @@ an install fails, and uninstalls the test app after the run.
    `perf_run.py --id-define FILM_CAPTURE=true`):
 
    ```kotlin
-   val dartDefines = (project.findProperty("dart-defines") as? String).orEmpty()
-       .split(",").mapNotNull { runCatching { String(java.util.Base64.getDecoder().decode(it)) }.getOrNull() }
-       .mapNotNull { v -> v.indexOf('=').takeIf { it > 0 }?.let { v.substring(0, it) to v.substring(it + 1) } }
-       .toMap()
+   // Top level of the file, with `import java.util.Base64` at the top:
+   // inside android {} `java.util` is shadowed, and newer Kotlin fails to
+   // infer types in nested lambdas (both broke a build).
+   val dartDefines: List<String> = (project.findProperty("dart-defines") as? String).orEmpty()
+       .split(",")
+       .filter { it.isNotEmpty() }
+       .map { encoded: String -> String(Base64.getDecoder().decode(encoded)) }
+   val perfCapture: Boolean = dartDefines.contains("PERF_CAPTURE=true")
    android { defaultConfig {
-       if (dartDefines["PERF_CAPTURE"] == "true") applicationIdSuffix = ".perf"
+       if (perfCapture) applicationIdSuffix = ".perf"
    } }
+   ```
+   With product flavors, set the suffix in the flavor the take uses (a
+   flavor's `applicationIdSuffix` replaces defaultConfig's) and pass
+   `perf_run.py --flavor <name>`:
+
+   ```kotlin
+   create("dev") { applicationIdSuffix = if (perfCapture) ".perf" else ".dev" }
    ```
    Check: `aapt dump badging build/app/outputs/flutter-apk/app-profile.apk | head -1`.
 2. `flutter pub add dev:vm_service` (plus `integration_test` / `flutter_test`
